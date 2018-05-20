@@ -49,6 +49,8 @@ DM-0000891
 #include <linux/clocksource.h>
 #include <linux/timekeeping.h>
 
+#include <asm/div64.h>
+
 #include "zsrmv.h"
 
 #include "zsrmvapi.h"
@@ -92,6 +94,14 @@ unsigned long long departure_start_timestamp_ticks=0L;
 unsigned long long departure_end_timestamp_ticks=0L;
 unsigned long long cumm_departure_ticks=0L;
 unsigned long long num_departures = 0L;
+
+
+inline unsigned long long DIV(unsigned long long a, unsigned long long b){
+  uint64_t _a = a;
+  do_div(_a,((uint32_t)b));
+  //_a = _a / b;
+  return _a;
+}
 
 /**
  * Trace structures
@@ -673,14 +683,19 @@ int arm_relative_timer(struct zs_timer *timer)
 {
   ktime_t ktime;
 
-  ktime = ktime_set(timer->absolute_expiration_ns / 1000000000,
-                    timer->absolute_expiration_ns % 1000000000);
+  ktime = ns_to_ktime(timer->absolute_expiration_ns);
+  
+  /* ktime = ktime_set(timer->absolute_expiration_ns / 1000000000, */
+  /*                   timer->absolute_expiration_ns % 1000000000); */
 
+#if 0
 #ifdef __ZS_DEBUG__
   printk("ZSRMV: arm_timer (%llu secs, %llu ns ) type(%s)\n", (timer->absolute_expiration_ns  / 1000000000),
 	 (timer->absolute_expiration_ns % 1000000000),
 	  timer->timer_type == TIMER_ENF ? "TIMER_ENF" : timer->timer_type == TIMER_PERIOD ? "TIMER_PERIOD" : "TIMER_ZS_ENF");
 #endif
+#endif
+  
   /* hrtimer_init(&(timer->kernel_timer), CLOCK_MONOTONIC, HRTIMER_MODE_REL); */
   timer->kernel_timer.function= kernel_timer_handler;
   hrtimer_start(&(timer->kernel_timer), ktime, HRTIMER_MODE_REL);
@@ -1661,8 +1676,9 @@ int start_enforcement_timer(struct reserve *rsvp)
   if (rsvp->exectime_ticks > rsvp->current_exectime_ticks){
     rest_ticks = rsvp->exectime_ticks - rsvp->current_exectime_ticks;
     rest_ns = ticks2ns(rest_ticks);
-    rsvp->enforcement_timer.expiration.tv_sec = (rest_ns / 1000000000L);
-    rsvp->enforcement_timer.expiration.tv_nsec = (rest_ns % 1000000000L);
+    rsvp->enforcement_timer.expiration = ktime_to_timespec(ns_to_ktime(rest_ticks));
+    /* rsvp->enforcement_timer.expiration.tv_sec = (rest_ns / 1000000000L); */
+    /* rsvp->enforcement_timer.expiration.tv_nsec = (rest_ns % 1000000000L); */
   } else {
     return 1;
   }
@@ -2677,32 +2693,51 @@ int long long ticksperus=0L;
 
 void set_ticksperus(int long long ticks, int long long nanos){
   ticksperus = ticks *1000;
-  ticksperus = ticksperus / nanos;
+  ticksperus = DIV(ticksperus,nanos);
+  /* ticksperus = ticksperus / nanos; */
 }
 
-unsigned long long ticks2ns(unsigned long long ticks){
+unsigned long long ticks2ns(unsigned long long ticks)
+#if LINUX_VERSION_CODE > KERNEL_VERSION(4,4,6)
+{
+  return ticks;
+}
+#else
+{
   unsigned long long ns;
 
   ns = ticks*1000;
-  ns = ns / ticksperus;
+  // Dio: commented just for testing 
+  //ns = ns / ticksperus;
 
   return ns;
 }
+#endif
 
-unsigned long long ns2ticks(unsigned long long ns){
-  unsigned long long ticks;
+unsigned long long ns2ticks(unsigned long long ns)
+#if LINUX_VERSION_CODE > KERNEL_VERSION(4,4,6)
+{
+  return ns;
+}
+#else
+{  unsigned long long ticks;
 
   ticks = ns * ticksperus;
-  ticks = ticks / 1000;
+  // Dio: commented just for testing
+  //ticks = ticks / 1000;
 
   return ticks;
 }
+#endif
 
 void setup_ticksclock(void)
 #ifdef STAC_FRAMAC_STUBS
 ;
 #else
 #if LINUX_VERSION_CODE < KERNEL_VERSION(4,4,6)
+{}
+#else
+#if LINUX_VERSION_CODE > KERNEL_VERSION(4,4,6)
 {}
 #else
 {
@@ -2720,6 +2755,8 @@ void setup_ticksclock(void)
 }
 #endif
 #endif
+#endif
+
 
 /*********************************************************************/
 /*@requires fp11 && fp12 && fp13;
@@ -2738,12 +2775,21 @@ void setup_ticksclock(void)
   @behavior b3: @assumes zsrm1_stop2 && zsrm2; @ensures zsrm1_stop2 && zsrm2;
 */
 /*********************************************************************/
+
+
 unsigned long long get_now_ticks(void)
 #ifdef STAC_FRAMAC_STUBS
 ;
 #else
 #if LINUX_VERSION_CODE < KERNEL_VERSION(4,4,6)
 { return 0; }
+#else
+#if LINUX_VERSION_CODE > KERNEL_VERSION(4,4,6)
+{
+  ktime_t t;
+  t =ktime_get_raw();
+  return (unsigned long long) ktime_to_ns(t);
+}
 #else
 {
   struct system_time_snapshot snap;
@@ -2752,6 +2798,8 @@ unsigned long long get_now_ticks(void)
 }
 #endif
 #endif
+#endif
+
 
 /* dummy function. */
 static int zsrm_open(struct inode *inode, struct file *filp)
@@ -2774,7 +2822,14 @@ static ssize_t zsrm_read(struct file *filp,	/* see include/linux/fs.h   */
 {
   int transfer_size;
 
-  transfer_size = (length >= (trace_index * sizeof(struct trace_rec_t))) ? (trace_index * sizeof(struct trace_rec_t)) : (length / sizeof(struct trace_rec_t)) * sizeof(struct trace_rec_t) ; 
+  if (length >= (trace_index * sizeof(struct trace_rec_t))){
+    transfer_size = (trace_index * sizeof(struct trace_rec_t));
+  } else {
+    transfer_size = DIV(length,sizeof(struct trace_rec_t)) * sizeof(struct trace_rec_t);
+  }
+  /* transfer_size = (length >= (trace_index * sizeof(struct trace_rec_t))) ? */
+  /*   (trace_index * sizeof(struct trace_rec_t)) : */
+  /*   (length / sizeof(struct trace_rec_t)) * sizeof(struct trace_rec_t) ; */
 
   if (copy_to_user(buffer, trace_table, transfer_size)<0){
       printk(KERN_WARNING "ZSRMV: error copying trace_table to user space\n");
@@ -2922,8 +2977,10 @@ static ssize_t zsrm_write
 	  reserve_table[ret].zsinstant_ns *= 2;
 	}
 
-	reserve_table[ret].zsinstant.tv_sec =  reserve_table[ret].zsinstant_ns / 1000000000L;
-	reserve_table[ret].zsinstant.tv_nsec = reserve_table[ret].zsinstant_ns % 1000000000L;
+	reserve_table[ret].zsinstant = ktime_to_timespec(ns_to_ktime(reserve_table[ret].zsinstant_ns));
+
+	/* reserve_table[ret].zsinstant.tv_sec =  reserve_table[ret].zsinstant_ns / 1000000000L; */
+	/* reserve_table[ret].zsinstant.tv_nsec = reserve_table[ret].zsinstant_ns % 1000000000L; */
 	
 	add_rm_queue(&reserve_table[ret]);
 #ifdef __ZS_DEBUG__	
@@ -3138,7 +3195,7 @@ static int __init zsrm_init(void)
   
   kthread_bind(active_task, 0);
 
-  
+
   setup_ticksclock();
   
   printk(KERN_WARNING "ZSRMMV: ready!\n");
@@ -3156,32 +3213,38 @@ void print_overhead_stats(void)
   unsigned long long avg_departure_ns = 0L;
 
   if (num_context_switches >0){
-    avg_context_switch_ns = cumm_context_switch_ticks / num_context_switches;
+    avg_context_switch_ns = DIV(cumm_context_switch_ticks,num_context_switches);
+    /* avg_context_switch_ns = cumm_context_switch_ticks / num_context_switches; */
     avg_context_switch_ns = ticks2ns(avg_context_switch_ns);
   }
 
   if (num_enforcements>0){
-    avg_enforcement_ns = cumm_enforcement_ticks / num_enforcements;
+    avg_enforcement_ns = DIV(cumm_enforcement_ticks,num_enforcements);
+    /* avg_enforcement_ns = cumm_enforcement_ticks / num_enforcements; */
     avg_enforcement_ns = ticks2ns(avg_enforcement_ns);
   }
 
   if (num_zs_enforcements>0){
-    avg_zs_enforcement_ns = cumm_zs_enforcement_ticks / num_zs_enforcements;
+    avg_zs_enforcement_ns = DIV(cumm_zs_enforcement_ticks,num_zs_enforcements);
+    /* avg_zs_enforcement_ns = cumm_zs_enforcement_ticks / num_zs_enforcements; */
     avg_zs_enforcement_ns = ticks2ns(avg_zs_enforcement_ns);
   }
 
   if (num_arrivals >0){
-    avg_arrival_ns = cumm_arrival_ticks / num_arrivals;
+    avg_arrival_ns = DIV(cumm_arrival_ticks,num_arrivals);
+    /* avg_arrival_ns = cumm_arrival_ticks / num_arrivals; */
     avg_arrival_ns = ticks2ns(avg_arrival_ns);
   }
 
   if (num_blocked_arrivals>0){
-    avg_blocked_arrival_ns = cumm_blocked_arrival_ticks / num_blocked_arrivals;
+    avg_blocked_arrival_ns = DIV(cumm_blocked_arrival_ticks,num_blocked_arrivals);
+    /* avg_blocked_arrival_ns = cumm_blocked_arrival_ticks / num_blocked_arrivals; */
     avg_blocked_arrival_ns = ticks2ns(avg_blocked_arrival_ns);
   }
 
   if (num_departures >0){
-    avg_departure_ns = cumm_departure_ticks / num_departures;
+    avg_departure_ns = DIV(cumm_departure_ticks,num_departures);
+    /* avg_departure_ns = cumm_departure_ticks / num_departures; */
     avg_departure_ns = ticks2ns(avg_departure_ns);
   }
 
