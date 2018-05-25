@@ -226,7 +226,7 @@ int main(int argc, char *argv[])
   fprintf(ofid,"<!DOCTYPE html>\n");
   fprintf(ofid,"<html>\n");
   fprintf(ofid,"<body>\n");
-  fprintf(ofid,"<svg width=\"%llu\" height=\"%d\">\n",(max_ts-min_ts)+50+margin,(max_rid-min_rid+1+1)*200+50);
+  fprintf(ofid,"<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"%llu\" height=\"%d\">\n",(max_ts-min_ts)+50+margin,(max_rid-min_rid+1+1)*200+50);
 
   currentrid=start_rid;
   do {

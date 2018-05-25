@@ -37,31 +37,29 @@
 #
 #DM-0000891
 
+ifeq ($(ARCH),arm)
+	CROSS_COMPILE=/home/dionisio/git/raspberrypi/tools/arm-bcm2708/gcc-linaro-arm-linux-gnueabihf-raspbian-x64/bin/arm-linux-gnueabihf-
+	CC=$(CROSS_COMPILE)gcc
+	AR=$(CROSS_COMPILE)ar
+	LD=$(CROSS_COMPILE)ld
+	AS=$(CROSS_COMPILE)as
+else
+	CC=gcc
+	AR=ar
+	LD=ld
+	AS=as
+endif
 
-#CROSS_COMPILE=../../../toolchain/arm-2009q1/bin/arm-none-linux-gnueabi-
-#CC=$(CROSS_COMPILE)gcc
-#AR=$(CROSS_COMPILE)ar
-#LD=$(CROSS_COMPILE)ld
-#AS=$(CROSS_COMPILE)as
-
-CC=gcc
-AR=ar
-LD=ld
-AS=as
-
-all:	libzsv.a gen-speed-params
+all:	libzsv.a #gen-speed-params
 
 clean:
-	rm -f libzsv.a libzsv.o admission.o gen-speed-params *~
+	rm -f libzsv.a libzsv.o gen-speed-params *~
 
-libzsv.o:	libzsv.c speed_params.h
-	$(CC) -fPIC -c libzsv.c -o libzsv.o
+libzsv.o:	libzsv.c 
+	$(CC) -fPIC -c libzsv.c -o libzsv.o -I..
 
-admission.o:	../admission.c
-	$(CC) -fPIC -c ../admission.c -o admission.o
+libzsv.a:	libzsv.o
+	$(AR) -rcs libzsv.a libzsv.o
 
-libzsv.a:	libzsv.o admission.o
-	$(AR) -rcs libzsv.a libzsv.o admission.o
-
-gen-speed-params:	gen-speed-params.c libzsv.a
-	$(CC) -o gen-speed-params gen-speed-params.c -lzsv -L.
+gen-speed-params:	gen-speed-params.c
+	$(CC) -o gen-speed-params gen-speed-params.c -L. -lzsv -lrt

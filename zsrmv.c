@@ -97,8 +97,10 @@ unsigned long long num_departures = 0L;
 
 
 inline unsigned long long DIV(unsigned long long a, unsigned long long b){
-  uint64_t _a = a;
-  do_div(_a,((uint32_t)b));
+  //uint64_t _a = a;
+  unsigned long long _a =a;
+  unsigned long _b = (unsigned long) b;
+  do_div(_a,_b);
   //_a = _a / b;
   return _a;
 }
@@ -1000,24 +1002,24 @@ int set_rm_priorities(void)
   @ensures fp31 && fp32 && zsrm1 && zsrm2 && zsrm3 && zsrm4 && zsrm7;
 */
 /*********************************************************************/
-float compute_total_utilization(void)
-{
-  float u=0.0f;
-  struct reserve *t = rm_head;
-  int rsv_visited=0;
+/* float compute_total_utilization(void) */
+/* { */
+/*   float u=0.0f; */
+/*   struct reserve *t = rm_head; */
+/*   int rsv_visited=0; */
 
-  /*@loop assigns t,u;*/
-  rsv_visited=0;
-  while(rsv_visited <= MAX_RESERVES && t!=NULL){
-    rsv_visited++;
-    u = u + ((t->execution_time.tv_sec*1000000000L+t->execution_time.tv_nsec) / (t->period_ns *1.0f));
-    t=t->rm_next;
-  }
-  if (rsv_visited >MAX_RESERVES && t != NULL){
-    printk("ZSRMMV.compute_total_utilization() ERROR rm_queue corrupted\n");
-  }
-  return u;
-}
+/*   /\*@loop assigns t,u;*\/ */
+/*   rsv_visited=0; */
+/*   while(rsv_visited <= MAX_RESERVES && t!=NULL){ */
+/*     rsv_visited++; */
+/*     u = u + ((t->execution_time.tv_sec*1000000000L+t->execution_time.tv_nsec) / (t->period_ns *1.0f)); */
+/*     t=t->rm_next; */
+/*   } */
+/*   if (rsv_visited >MAX_RESERVES && t != NULL){ */
+/*     printk("ZSRMMV.compute_total_utilization() ERROR rm_queue corrupted\n"); */
+/*   } */
+/*   return u; */
+/* } */
 #endif
 
 /*********************************************************************/
@@ -1644,8 +1646,9 @@ int get_wcet_ns(int rid, unsigned long long *wcet)
 int get_acet_ns(int rid, unsigned long long *avet)
 {
   if (reserve_table[rid].avg_exectime_ticks_measurements>0){
-    *avet = ticks2ns(reserve_table[rid].avg_exectime_ticks /
-		     reserve_table[rid].avg_exectime_ticks_measurements);
+    /* *avet = ticks2ns(reserve_table[rid].avg_exectime_ticks / */
+    /* 		     reserve_table[rid].avg_exectime_ticks_measurements); */
+    *avet = DIV(reserve_table[rid].avg_exectime_ticks,reserve_table[rid].avg_exectime_ticks_measurements);
   } else {
     *avet = 0L;
   }
@@ -1676,7 +1679,7 @@ int start_enforcement_timer(struct reserve *rsvp)
   if (rsvp->exectime_ticks > rsvp->current_exectime_ticks){
     rest_ticks = rsvp->exectime_ticks - rsvp->current_exectime_ticks;
     rest_ns = ticks2ns(rest_ticks);
-    rsvp->enforcement_timer.expiration = ktime_to_timespec(ns_to_ktime(rest_ticks));
+    rsvp->enforcement_timer.expiration =  ktime_to_timespec(ns_to_ktime(rest_ticks));
     /* rsvp->enforcement_timer.expiration.tv_sec = (rest_ns / 1000000000L); */
     /* rsvp->enforcement_timer.expiration.tv_nsec = (rest_ns % 1000000000L); */
   } else {
@@ -2382,12 +2385,18 @@ void init_reserve(int rid)
   reserve_table[rid].period_timer.next = NULL;
   reserve_table[rid].enforcement_timer.next = NULL;
   reserve_table[rid].start_period=0;
-  
+
+  printk("ZSRMV: init_reserve(rid(%d))\n",rid);
   // init timers to make sure we do not crash the kernel
   // if timer operations are called before we arm the timer.
-  hrtimer_init(&(reserve_table[rid].period_timer.kernel_timer), CLOCK_MONOTONIC_RAW, HRTIMER_MODE_REL);
-  hrtimer_init(&(reserve_table[rid].enforcement_timer.kernel_timer), CLOCK_MONOTONIC_RAW, HRTIMER_MODE_REL);
-  hrtimer_init(&(reserve_table[rid].zero_slack_timer.kernel_timer), CLOCK_MONOTONIC_RAW, HRTIMER_MODE_REL);
+  
+  /* hrtimer_init(&(reserve_table[rid].period_timer.kernel_timer), CLOCK_MONOTONIC_RAW, HRTIMER_MODE_REL); */
+  /* hrtimer_init(&(reserve_table[rid].enforcement_timer.kernel_timer), CLOCK_MONOTONIC_RAW, HRTIMER_MODE_REL); */
+  /* hrtimer_init(&(reserve_table[rid].zero_slack_timer.kernel_timer), CLOCK_MONOTONIC_RAW, HRTIMER_MODE_REL); */
+
+  hrtimer_init(&(reserve_table[rid].period_timer.kernel_timer), CLOCK_MONOTONIC, HRTIMER_MODE_REL);
+  hrtimer_init(&(reserve_table[rid].enforcement_timer.kernel_timer), CLOCK_MONOTONIC, HRTIMER_MODE_REL);
+  hrtimer_init(&(reserve_table[rid].zero_slack_timer.kernel_timer), CLOCK_MONOTONIC, HRTIMER_MODE_REL);
 
 }
 
@@ -2691,6 +2700,7 @@ static void activator_task(void *a)
 
 int long long ticksperus=0L;
 
+
 void set_ticksperus(int long long ticks, int long long nanos){
   ticksperus = ticks *1000;
   ticksperus = DIV(ticksperus,nanos);
@@ -2707,8 +2717,7 @@ unsigned long long ticks2ns(unsigned long long ticks)
   unsigned long long ns;
 
   ns = ticks*1000;
-  // Dio: commented just for testing 
-  //ns = ns / ticksperus;
+  ns = ns / ticksperus;
 
   return ns;
 }
@@ -2723,8 +2732,7 @@ unsigned long long ns2ticks(unsigned long long ns)
 {  unsigned long long ticks;
 
   ticks = ns * ticksperus;
-  // Dio: commented just for testing
-  //ticks = ticks / 1000;
+  ticks = ticks / 1000;
 
   return ticks;
 }
@@ -2822,15 +2830,10 @@ static ssize_t zsrm_read(struct file *filp,	/* see include/linux/fs.h   */
 {
   int transfer_size;
 
-  if (length >= (trace_index * sizeof(struct trace_rec_t))){
-    transfer_size = (trace_index * sizeof(struct trace_rec_t));
-  } else {
-    transfer_size = DIV(length,sizeof(struct trace_rec_t)) * sizeof(struct trace_rec_t);
-  }
-  /* transfer_size = (length >= (trace_index * sizeof(struct trace_rec_t))) ? */
-  /*   (trace_index * sizeof(struct trace_rec_t)) : */
-  /*   (length / sizeof(struct trace_rec_t)) * sizeof(struct trace_rec_t) ; */
-
+  transfer_size = (length >= (trace_index * sizeof(struct trace_rec_t))) ?
+    (trace_index * sizeof(struct trace_rec_t)) :
+    (length / sizeof(struct trace_rec_t)) * sizeof(struct trace_rec_t) ;
+  
   if (copy_to_user(buffer, trace_table, transfer_size)<0){
       printk(KERN_WARNING "ZSRMV: error copying trace_table to user space\n");
   }

@@ -217,7 +217,11 @@ void busy_timestamped(long millis, unsigned long long tsbuffer[],
   //#endif // DD: Commented out
 }
 
-
+/********************************
+ * Dio: need to change the admission test
+ * for now it is disabled
+ ********************************/
+#if 0
 int zsv_is_admissible(struct reserve_spec_t *reserves_specs_table, int tablesize)
 {
   struct reserve *rtable;
@@ -287,7 +291,7 @@ int zsv_is_admissible(struct reserve_spec_t *reserves_specs_table, int tablesize
   
   return admissible;
 }
-
+#endif
 
 /*********************************************************************/
 /*@requires fp1 && fp2 && fp31 && fp32 && zsrm1 && zsrm2 && zsrm3 && zsrm4;

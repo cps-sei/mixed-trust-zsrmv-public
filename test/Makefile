@@ -37,11 +37,18 @@
 #Carnegie Mellon® is registered in the U.S. Patent and Trademark Office by Carnegie Mellon University.
 #
 #DM-0000891
-
-CC=gcc
-AR=ar
-LD=ld
-AS=as
+ifeq ($(ARCH),arm)
+	CROSS_COMPILE=/home/dionisio/git/raspberrypi/tools/arm-bcm2708/gcc-linaro-arm-linux-gnueabihf-raspbian-x64/bin/arm-linux-gnueabihf-
+	CC=$(CROSS_COMPILE)gcc
+	AR=$(CROSS_COMPILE)ar
+	LD=$(CROSS_COMPILE)ld
+	AS=$(CROSS_COMPILE)as
+else
+	CC=gcc
+	AR=ar
+	LD=ld
+	AS=as
+endif
 
 SRCS = $(wildcard *.c)
 

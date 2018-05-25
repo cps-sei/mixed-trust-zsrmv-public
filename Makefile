@@ -1,3 +1,3 @@
 obj-m := zsrmv.o
+EXTRA_CFLAGS=-g -DDEBUG
 
-#module-objs += zsrmv.o admission.o

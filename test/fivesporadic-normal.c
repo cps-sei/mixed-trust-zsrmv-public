@@ -227,6 +227,7 @@ int main(int argc, char *argv[])
   int r,i,cnt;
   int parent;
   int rid;
+  long l;
 
   if ((schedfd = zsv_open_scheduler())<0){
     printf("Error opening the scheduler");
@@ -347,7 +348,7 @@ int main(int argc, char *argv[])
       return -1;
     }
     
-    for (long l=0; l < *tsidx; l++){
+    for (l=0; l < *tsidx; l++){
       fprintf(fid,"%llu 1\n",(tsbuf[l]-start_timestamp_ns)/1000000);
     }
     
