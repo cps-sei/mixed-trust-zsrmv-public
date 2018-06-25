@@ -91,10 +91,12 @@ int main(int argc, char *argv[])
   }
 
   if ((rid = zsv_create_reserve(schedfd,
-				1, // period_secs
+				2, // period_secs
 				0, // period_nsecs
-				1, // zsinstant_sec -- same as period = disabled
+				2, // zsinstant_sec -- same as period = disabled
 				0, // zsinstant_nsec -- same as period = disabled
+				1, // hypertask enforcement sec
+				0, // hypertask enforcement nsec
 				0, // exectime _secs
 				300000000, // exectime_nsecs
 				0, // nominal_exectime_sec -- same as overloaded

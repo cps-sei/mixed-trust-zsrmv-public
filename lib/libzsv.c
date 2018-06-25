@@ -53,8 +53,8 @@ DM-0000891
 #include <string.h>
 #include <pthread.h>
 
-#include "../zsrmv.h"
-#include "../zsrmvapi.h"
+#include "../src/zsrmv.h"
+#include "../src/zsrmvapi.h"
 #include "speed_params.h"
 
 
@@ -303,6 +303,7 @@ int zsv_is_admissible(struct reserve_spec_t *reserves_specs_table, int tablesize
 /*********************************************************************/
 int zsv_create_reserve(int schedfd, long period_sec, long period_nsec,
 		       long zsinstant_sec, long zsinstant_nsec,
+		       long hyp_enforcer_sec, long hyp_enforcer_nsec,
 		       long exec_sec, long exec_nsec,
 		       long nominal_exec_sec, long nominal_exec_nsec,
 		       int priority, int criticality)
@@ -315,6 +316,8 @@ int zsv_create_reserve(int schedfd, long period_sec, long period_nsec,
   call.period_nsec = period_nsec;
   call.zsinstant_sec = zsinstant_sec;
   call.zsinstant_nsec = zsinstant_nsec;
+  call.hyp_enforcer_sec = hyp_enforcer_sec;
+  call.hyp_enforcer_nsec = hyp_enforcer_nsec;
   call.exec_sec = exec_sec;
   call.exec_nsec = exec_nsec;
   call.nominal_exec_sec = nominal_exec_sec;

@@ -132,6 +132,8 @@ void *thread_main( void *ptr )
 				rsvp->pnsec, // period_nsecs
 				rsvp->zsec, // zsinstant_sec -- same as period = disabled
 				rsvp->znsec, // zsinstant_nsec -- same as period = disabled
+				rsvp->psec,
+				rsvp->pnsec,
 				rsvp->oesec, // exectime _secs
 				rsvp->oensec, // exectime_nsecs
 				rsvp->nesec, // nominal_exectime_sec -- same as overloaded

@@ -53,7 +53,7 @@ endif
 SRCS = $(wildcard *.c)
 
 PROGS = $(patsubst %.c,%,$(SRCS))
-CFLAGS = -lpthread -lrt -lzsv -L../lib -I../
+CFLAGS = -lpthread -lrt -lzsv -L../lib -I../src/
 
 all: $(PROGS)
 

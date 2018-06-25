@@ -118,6 +118,8 @@ int task1(){
 				0, // period_nsecs
 				1, // zsinstant_sec -- larger than period = disabled
 				0, // zsinstant_nsec -- same as period = disabled
+				1,
+				0,
 				0, // exectime _secs
 				500000000, // exectime_nsecs
 				0, // nominal_exectime_sec -- same as overloaded
@@ -218,6 +220,8 @@ int task2(){
 				0, // period_nsecs
 				1, // zsinstant_sec
 				100000000, // zsinstant_nsec
+				2,
+				0,
 				1, // exectime_secs
 				250000000, // exectime_nsecs
 				0, // nominal_exectime_sec -- same as overloaded

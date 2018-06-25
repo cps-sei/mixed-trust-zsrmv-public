@@ -112,6 +112,8 @@ void *thread1_main( void *ptr )
 				0, // period_nsecs
 				1, // zsinstant_sec -- same as period = disabled
 				0, // zsinstant_nsec -- same as period = disabled
+				1,
+				0,
 				0, // exectime _secs
 				300000000, // exectime_nsecs
 				0, // nominal_exectime_sec -- same as overloaded
@@ -212,6 +214,8 @@ void *thread2_main( void *ptr )
 				0, // period_nsecs
 				2, // zsinstant_sec -- same as period = disabled
 				0, // zsinstant_nsec -- same as period = disabled
+				2,
+				0,
 				0, // exectime _secs
 				300000000, // exectime_nsecs
 				0, // nominal_exectime_sec -- same as overloaded
