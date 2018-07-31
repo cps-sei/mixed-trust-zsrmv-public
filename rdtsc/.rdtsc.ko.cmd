@@ -1,0 +1,1 @@
+cmd_/home/dionisio/tmp/rdtsc/rdtsc.ko := /home/dionisio/git/raspberrypi/tools/arm-bcm2708/gcc-linaro-arm-linux-gnueabihf-raspbian-x64/bin/arm-linux-gnueabihf-ld -EL -r  -T ./scripts/module-common.lds --build-id  -o /home/dionisio/tmp/rdtsc/rdtsc.ko /home/dionisio/tmp/rdtsc/rdtsc.o /home/dionisio/tmp/rdtsc/rdtsc.mod.o
