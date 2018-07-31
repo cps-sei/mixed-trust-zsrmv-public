@@ -59,6 +59,42 @@ void __hvc(u32 uhcall_function, void *uhcall_buffer,
 	    );
 }
 
+u64 hypmtscheduler_readtsc64(void){
+	u32 tsc_lo, tsc_hi;
+	u64 l_tickcount;
+
+	asm volatile
+		(	" isb\r\n"
+			" mrrc p15, 1, r0, r1, c14 \r\n"
+			" mov %0, r0 \r\n"
+			" mov %1, r1 \r\n"
+				: "=r" (tsc_lo), "=r" (tsc_hi) // outputs
+				: // inputs
+	           : "r0", "r1" //clobber
+	    );
+
+	l_tickcount = tsc_hi;
+	l_tickcount = l_tickcount << 32;
+	l_tickcount |= tsc_lo;
+
+}
+
+
+u32 hypmtscheduler_readtscfreq(void){
+	u32 tsc_freq;
+
+	asm volatile
+		(	" isb\r\n"
+			"mrc p15, 0, r0, c14, c0, 0 \r\n"
+			" mov %0, r0 \r\n"
+				: "=r" (tsc_freq) // outputs
+				: // inputs
+	           : "r0" //clobber
+	    );
+
+	return tsc_freq;
+}
+
 bool hypmtscheduler_createhyptask(u32 first_period, u32 regular_period,
 			u32 priority, u32 hyptask_id, u32 *hyptask_handle){
 
@@ -160,6 +196,7 @@ bool hypmtscheduler_getrawtick64(u64 *tickcount){
 	ugapp_hypmtscheduler_param_t *hmtsp;
 	struct page *hmtsp_page;
 	u32 hmtsp_paddr;
+	u64 l_tickcount;
 
 	hmtsp_page = alloc_page(GFP_KERNEL | __GFP_ZERO);
 
@@ -172,6 +209,7 @@ bool hypmtscheduler_getrawtick64(u64 *tickcount){
 	hmtsp->uhcall_fn = UAPP_HYPMTSCHEDULER_UHCALL_GETRAWTICK;
 
 	hmtsp_paddr = page_to_phys(hmtsp_page);
+
 	__hvc(UAPP_HYPMTSCHEDULER_UHCALL, hmtsp_paddr, sizeof(ugapp_hypmtscheduler_param_t));
 
 	if(!hmtsp->status){
@@ -179,9 +217,19 @@ bool hypmtscheduler_getrawtick64(u64 *tickcount){
 		return false;
 	}
 
-	*tickcount = (u64)((hmtsp->oparam_1 << 32) | hmtsp->oparam_2);
 
+	l_tickcount = hmtsp->oparam_1;
+	l_tickcount = l_tickcount << 32;
+	l_tickcount |= hmtsp->oparam_2;
+
+	printk(KERN_INFO "hypmtscheduler_getrawtick64: oparam_1 = 0x%08x\n", hmtsp->oparam_1);
+	printk(KERN_INFO "hypmtscheduler_getrawtick64: oparam_2 = 0x%08x\n", hmtsp->oparam_2);
+	printk(KERN_INFO "hypmtscheduler_getrawtick64: l_tickcount = 0x%016llx\n", l_tickcount);
+
+	//*tickcount = (u64)((hmtsp->oparam_1 << 32) | hmtsp->oparam_2);
+	*tickcount = l_tickcount;
 	__free_page(hmtsp_page);
+
 	return true;
 }
 

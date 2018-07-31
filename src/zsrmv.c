@@ -63,6 +63,8 @@ extern u64 sysreg_read_cntpct(void);
 
 extern bool hypmtscheduler_getrawtick64(u64 *tickcount);
 
+extern u64 hypmtscheduler_readtsc64(void);
+
 #include "zsrmv.h"
 
 #include "zsrmvapi.h"
@@ -3311,11 +3313,14 @@ static int __init zsrm_init(void)
   setup_ticksclock();
 
   /* start_tick = sysreg_read_cntpct(); */
-  hypmtscheduler_getrawtick64(&start_tick);
+  /* hypmtscheduler_getrawtick64(&start_tick); */
+  start_tick =  hypmtscheduler_readtsc64();
+
   for (cnt =0 ; cnt <1000;cnt++)
     ret=cnt+1;
+  end_tick =  hypmtscheduler_readtsc64();
   /* end_tick = sysreg_read_cntpct(); */
-  hypmtscheduler_getrawtick64(&end_tick);
+  /* hypmtscheduler_getrawtick64(&end_tick); */
 
   printk("ZSRMV: cycle counter test (for-loop 1000) start(%llu) end(%llu) count=%llu\n",start_tick, end_tick, (end_tick-start_tick));
   
