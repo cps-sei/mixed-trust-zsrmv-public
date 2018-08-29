@@ -23,6 +23,7 @@
 #define GET_TRACE_SIZE 9
 #define END_PERIOD 10
 #define WAIT_RELEASE 11
+#define TEST_RESERVE 12
 
 #define STRING_ZSV_CALL(c) ( c == WAIT_PERIOD ? "wait_period" : \
 			     c == CREATE_RSV  ? "create_rsv"  : \
@@ -154,6 +155,7 @@ int add_threaded_signal_handler_record(struct threaded_signal_handler_table_t *r
 int del_thraded_signal_handler_record(struct threaded_signal_handler_table_t *rec);
 int zsv_wait_release(int schedfd, int rid);
 int zsv_end_period(int schedfd, int rid);
+int zsv_test_reserve(int schedfd, int option);
 #ifndef __KERNEL__
 int zsv_write_trace(int schedfd, FILE *fid);
 #endif

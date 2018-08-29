@@ -43,6 +43,7 @@ DM-0000891
 #include <unistd.h>
 #include <time.h>
 #include <sys/types.h>
+#include <stdint.h>
 #include <sys/stat.h>
 #include <fcntl.h>
 #include <sys/shm.h>
@@ -602,4 +603,15 @@ int zsv_write_trace(int schedfd, FILE *fid)
     
     free(tracep);
   }
+}
+
+int zsv_test_reserve(int schedfd, int option)
+{
+  struct api_call call;
+  int ret;
+
+  call.cmd=TEST_RESERVE;
+  call.rid = option;
+  ret =  write(schedfd, &call, sizeof(call));
+  return ret;
 }

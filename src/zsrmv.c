@@ -48,6 +48,7 @@ DM-0000891
 
 #include <linux/clocksource.h>
 #include <linux/timekeeping.h>
+#include <linux/delay.h>
 
 #include <asm/div64.h>
 
@@ -64,6 +65,16 @@ extern u64 sysreg_read_cntpct(void);
 extern bool hypmtscheduler_getrawtick64(u64 *tickcount);
 
 extern u64 hypmtscheduler_readtsc64(void);
+
+extern bool hypmtscheduler_inittsc(void);
+
+extern bool hypmtscheduler_logtsc(u32 event);
+
+extern bool hypmtscheduler_dumpdebuglog(u8 *dst_log_buffer, u32 *num_entries);
+
+
+hypmtscheduler_logentry_t debug_log[DEBUG_LOG_SIZE];
+u32 debug_log_buffer_index = 0;
 
 #include "zsrmv.h"
 
@@ -124,7 +135,24 @@ inline unsigned long long DIV(unsigned long long a, unsigned long long b){
 
 
 /**
- * These two function need to be compiled only on ARM
+ *  Enable use of sys_tsc
+ */
+#define __ZS_USE_SYSTSC__ 1
+
+
+/**
+ * USE HYPERVISOR TSC
+ */
+
+//#define __ZS_USE_HYPTSC__ 1
+
+/**
+ * Enable or disable the timestamp counter
+ */
+#define __ZS_USE_TSC__ 1
+
+/**
+ * These functions need to be compiled only on ARM
  * Need to add conditional compilation macros
  */
 static inline void ccnt_init (void)
@@ -138,6 +166,60 @@ static inline unsigned ccnt_read (void)
   asm volatile ("mrc p15, 0, %0, c15, c12, 1" : "=r" (cc));
   return cc;
 }
+
+#define PMCNTNSET_C_BIT		0x80000000
+#define PMCR_C_BIT		0x00000004
+#define PMCR_E_BIT		0x00000001
+#define PMCR_LC_BIT             (1UL<<6)
+
+void init_cputsc(void){
+	unsigned long tmp;
+
+	tmp = PMCNTNSET_C_BIT;
+	asm volatile ("mcr p15, 0, %0, c9, c12, 1" : : "r" (tmp));
+	asm volatile ("mrc p15, 0, %0, c9, c12, 0" : "=r" (tmp));
+	tmp |= PMCR_C_BIT | PMCR_E_BIT | PMCR_LC_BIT ;
+	asm volatile ("mcr p15, 0, %0, c9, c12, 0" : : "r" (tmp));
+}
+
+u32 rdcntfrq(void){
+	u32 frq;
+
+	asm volatile
+	  ("mrc p15, 0, r0, c14, c0, 0 \r\n"
+	   "mov %0, r0 \r\n"
+	   : "=r" (frq)  // output
+	   : // inputs
+	   : "r0" // clobber
+	   );
+
+	return frq;
+}
+
+u64 rdtsc64(void){
+	u32 tsc_lo, tsc_hi;
+	u64 l_tickcount;
+
+	asm volatile
+	  (	//" dsb\r\n" // data synchronization barrier *** testing to see if we need this
+		//" isb\r\n" // instruction synchronization barrier
+		// Syntax: MRRC <coproc>=coprocessor, <#opcode3>=coproc opcode, Rt, Rt2, CRm=coproc reg
+		" mrrc p15, 0, r0, r1, c9 \r\n" // read 64 bits tsc 
+		" mov %0, r0 \r\n"
+		" mov %1, r1 \r\n"
+		: "=r" (tsc_lo), "=r" (tsc_hi) // outputs
+		: // inputs
+		: "r0", "r1" //clobber
+	    );
+
+	l_tickcount = tsc_hi;
+	l_tickcount = l_tickcount << 32;
+	l_tickcount |= tsc_lo;
+
+	return l_tickcount;
+}
+
+
 /*************** END OF ARM ONLY ***********************/
 
 
@@ -217,92 +299,9 @@ int zsrmcall=-1;
 struct task_struct *sched_task;
 struct task_struct *active_task;
 
-/**
- *   MOVED TO zsrmv.h to improve modularity
- */
-
-/* struct zs_timer{ */
-/*   timer_t tid; */
-/*   int rid; */
-/*   int timer_type; */
-/*   struct timespec expiration; */
-/*   unsigned long long absolute_expiration_ns; */
-/*   struct hrtimer kernel_timer; */
-/*   struct zs_timer *next; */
-
-/* #ifdef STAC_FRAMAC_STUBS */
-/*   //-- ghost variable to indicate whether the timer is armed and the */
-/*   //-- time (relative to point of arming) when it will go off */
-/*   int stac_armed; */
-/*   unsigned long long stac_expiration_ns; */
-/*   enum hrtimer_restart (*stac_handler)(struct hrtimer *timer); */
-/* #endif */
-/* }; */
-
-/* struct reserve { */
-/*   struct pid_namespace *task_namespace; */
-/*   pid_t  pid; */
-/*   int rid; */
-/*   unsigned long long start_ns; */
-/*   unsigned long long stop_ns; */
-/*   unsigned long long current_exectime_ns; */
-/*   unsigned long long exectime_ns; */
-/*   unsigned long long nominal_exectime_ns; */
-
-/*   unsigned long long start_ticks; */
-/*   unsigned long long stop_ticks; */
-/*   unsigned long long current_exectime_ticks; */
-/*   unsigned long long exectime_ticks; */
-/*   unsigned long long nominal_exectime_ticks; */
-/*   unsigned long long worst_exectime_ticks; */
-/*   unsigned long long avg_exectime_ticks; */
-/*   unsigned long avg_exectime_ticks_measurements; */
-
-/*   unsigned int num_period_wakeups; */
-
-/*   unsigned long num_enforcements; */
-/*   unsigned long num_wfnp; */
-/*   unsigned long num_wait_release; */
-/*   unsigned int non_periodic_wait; */
-/*   unsigned int end_of_period_marked; */
-
-/* #ifdef STAC_FRAMAC_STUBS */
-/*   //-- ghost variables we use to model the real execution time of a */
-/*   //-- job and start time of last job fragment */
-/*   unsigned long long real_exectime_ns; */
-/*   unsigned long long real_start_ns; */
-/* #endif */
-
-/*   int enforcement_type; */
-/*   struct timespec period; */
-/*   struct timespec zsinstant; */
-/*   unsigned long long period_ns; */
-/*   unsigned long long period_ticks; */
-/*   struct timespec execution_time; */
-/*   struct timespec nominal_execution_time; */
-/*   int priority; */
-/*   int criticality; */
-/*   int in_critical_mode; */
-/*   int enforced; */
-/*   int bound_to_cpu; */
-/*   struct zs_timer period_timer; */
-/*   struct zs_timer enforcement_timer; */
-/*   struct zs_timer zero_slack_timer; */
-/*   struct reserve *next; */
-/*   struct reserve *rm_next; */
-/*   struct reserve *crit_next; */
-/*   struct reserve *crit_block_next; */
-/*   int request_stop; */
-/*   int enforcement_signal_captured; */
-/*   int enforcement_signal_receiver_pid; */
-/*   int enforcement_signo; */
-/*   int attached; */
-
-/*   // Some debugging variables */
-/*   int start_period; */
-/* } reserve_table[MAX_RESERVES]; */
-
 struct reserve reserve_table[MAX_RESERVES];
+
+unsigned long long kernel_entry_timestamp_ticks=0;
 
 // only tasks with higher or equal criticality than sys_criticality are allowed
 // to run
@@ -344,6 +343,7 @@ int pop_to_reschedule(void);
 void init(void);
 enum hrtimer_restart kernel_timer_handler(struct hrtimer *timer);
 unsigned long long ticks2ns(unsigned long long ticks);
+unsigned long long ticks2ns1(unsigned long long ticks);
 unsigned long long ns2ticks(unsigned long long ns);
 void init_reserve(int rid);
 int get_acet_ns(int rid, unsigned long long *avet);
@@ -686,6 +686,21 @@ void __xchg_wrong_size(void);
 
 int add_trace_record(int rid, unsigned long long ts, int event_type)
 {
+/* #ifdef __ZS_USE_SYSTSC__ */
+/*   if (trace_index >= TRACE_BUFFER_SIZE) */
+/*     return -1; */
+
+/*   trace_table[trace_index].timestamp_ns = sysreg_read_cntpct(); //ts; */
+/*   trace_table[trace_index].event_type = event_type; */
+/*   trace_table[trace_index].rid = rid; */
+/*   trace_index++; */
+/*   return 0;   */
+/* #elif __ZS_USE_HYPTSC__ */
+  
+/*   hypmtscheduler_logtsc(event_type); */
+  
+/* #else */
+  
   if (trace_index >= TRACE_BUFFER_SIZE)
     return -1;
 
@@ -694,6 +709,7 @@ int add_trace_record(int rid, unsigned long long ts, int event_type)
   trace_table[trace_index].rid = rid;
   trace_index++;
   return 0;
+/* #endif */
 }
 
 /*********************************************************************/
@@ -1187,7 +1203,7 @@ void budget_enforcement(int rid, int request_stop)
 
   enforcement_start_timestamp_ticks = get_now_ticks();
 
-  add_trace_record(rid, ticks2ns(enforcement_start_timestamp_ticks), TRACE_EVENT_BUDGET_ENFORCEMENT);
+  add_trace_record(rid, ticks2ns(kernel_entry_timestamp_ticks), TRACE_EVENT_BUDGET_ENFORCEMENT);//ticks2ns(enforcement_start_timestamp_ticks), TRACE_EVENT_BUDGET_ENFORCEMENT);
 #ifdef __ZS_DEBUG__
   printk("ZSRMMV: budget_enforcement(rid(%d)) pid(%d)\n",rid, reserve_table[rid].pid);
 #endif
@@ -1213,7 +1229,7 @@ void budget_enforcement(int rid, int request_stop)
 							      (reserve_table[rid].end_of_period_marked ? 0 : 1) ));
     }
     if (!request_stop){
-      add_trace_record(rid, ticks2ns(enforcement_start_timestamp_ticks), TRACE_EVENT_DONT_WFNP);
+      add_trace_record(rid, ticks2ns(kernel_entry_timestamp_ticks), TRACE_EVENT_DONT_WFNP);//ticks2ns(enforcement_start_timestamp_ticks), TRACE_EVENT_DONT_WFNP);
     }
   } else {
     // ONLY ENFORCE IF THE SIGNAL IS NOT CAPTURED -- NOT SECURE MUST BE MODIFIED LATER
@@ -1351,18 +1367,18 @@ void start_of_period(int rid)
 
   if (reserve_table[rid].non_periodic_wait){
     if (reserve_table[rid].num_wait_release>0){
-      add_trace_record(rid,ticks2ns(arrival_start_timestamp_ticks),TRACE_EVENT_START_PERIOD_NON_PERIODIC_WAIT_WAKEUP);
+      add_trace_record(rid,ticks2ns(kernel_entry_timestamp_ticks),TRACE_EVENT_START_PERIOD_NON_PERIODIC_WAIT_WAKEUP);//ticks2ns(arrival_start_timestamp_ticks),TRACE_EVENT_START_PERIOD_NON_PERIODIC_WAIT_WAKEUP);
       wake_up_process(task);
       set_tsk_need_resched(task);
       
       calling_start_from = 1;
       start_stac(rid);
     } else {
-      add_trace_record(rid,ticks2ns(arrival_start_timestamp_ticks),TRACE_EVENT_START_PERIOD_NON_PERIODIC_WAIT_NO_WAKEUP);
+      add_trace_record(rid,ticks2ns(kernel_entry_timestamp_ticks),TRACE_EVENT_START_PERIOD_NON_PERIODIC_WAIT_NO_WAKEUP);//ticks2ns(arrival_start_timestamp_ticks),TRACE_EVENT_START_PERIOD_NON_PERIODIC_WAIT_NO_WAKEUP);
     }
     reserve_table[rid].num_wait_release = 0;
   } else {
-    add_trace_record(rid,ticks2ns(arrival_start_timestamp_ticks),TRACE_EVENT_START_PERIOD_PERIODIC_WAIT);
+    add_trace_record(rid,ticks2ns(kernel_entry_timestamp_ticks),TRACE_EVENT_START_PERIOD_PERIODIC_WAIT);//ticks2ns(arrival_start_timestamp_ticks),TRACE_EVENT_START_PERIOD_PERIODIC_WAIT);
       wake_up_process(task);
       set_tsk_need_resched(task);
       
@@ -1449,6 +1465,8 @@ void zs_enforcement(int rid)
 /*********************************************************************/
 void timer_handler(struct zs_timer *timer)
 {
+  kernel_entry_timestamp_ticks = get_now_ticks();
+  
   // process the timer
 #ifdef __ZS_DEBUG__  
   printk("ZSRMMV: timer handler rid(%d) timer-type(%s)\n",timer->rid,
@@ -1563,7 +1581,7 @@ int attach_reserve(int rid, int pid)
   add_timerq(&(reserve_table[rid].period_timer));
   add_timerq(&(reserve_table[rid].zero_slack_timer));
 
-  add_trace_record(rid,ticks2ns(get_now_ticks()),TRACE_EVENT_START_PERIOD);
+  add_trace_record(rid,ticks2ns(kernel_entry_timestamp_ticks),TRACE_EVENT_START_PERIOD);//ticks2ns(get_now_ticks()),TRACE_EVENT_START_PERIOD);
 
   
   calling_start_from = 2;
@@ -1658,11 +1676,11 @@ int delete_reserve(int rid)
   hrtimer_cancel(&(reserve_table[rid].zero_slack_timer.kernel_timer));
 
   if (reserve_table[rid].hypertask_active){
-    /* if(!hypmtscheduler_deletehyptask(reserve_table[rid].hyptask_handle)){ */
-    /*   printk("ZSRMV.delete_reserve(): error deleting hypertask\n"); */
-    /* } else { */
-    /*   reserve_table[rid].hypertask_active=0; */
-    /* } */
+    if(!hypmtscheduler_deletehyptask(reserve_table[rid].hyptask_handle)){
+      printk("ZSRMV.delete_reserve(): error deleting hypertask\n");
+    } else {
+      reserve_table[rid].hypertask_active=0;
+    }
   }
 
 #ifdef __ZS_DEBUG__  
@@ -1723,8 +1741,8 @@ int start_enforcement_timer(struct reserve *rsvp)
   //if (rsvp->current_exectime_ns < rsvp->exectime_ns){
   if (rsvp->exectime_ticks > rsvp->current_exectime_ticks){
     rest_ticks = rsvp->exectime_ticks - rsvp->current_exectime_ticks;
-    rest_ns = ticks2ns(rest_ticks);
-    rsvp->enforcement_timer.expiration =  ktime_to_timespec(ns_to_ktime(rest_ticks));
+    rest_ns = ticks2ns1(rest_ticks);
+    rsvp->enforcement_timer.expiration =  ktime_to_timespec(ns_to_ktime(rest_ns));//ktime_to_timespec(ns_to_ktime(rest_ticks));
     /* rsvp->enforcement_timer.expiration.tv_sec = (rest_ns / 1000000000L); */
     /* rsvp->enforcement_timer.expiration.tv_nsec = (rest_ns % 1000000000L); */
   } else {
@@ -1913,9 +1931,9 @@ void start(int rid)
     } else {
       if (new_runner){
 	if (old_rid >= 0){
-	  add_trace_record(old_rid,ticks2ns(now_ticks),TRACE_EVENT_PREEMPTED);	
+	  add_trace_record(old_rid,ticks2ns(kernel_entry_timestamp_ticks),TRACE_EVENT_PREEMPTED);//ticks2ns(now_ticks),TRACE_EVENT_PREEMPTED);
 	}
-	add_trace_record(readyq->rid,ticks2ns(now_ticks),TRACE_EVENT_RESUMED);
+	add_trace_record(readyq->rid,ticks2ns(kernel_entry_timestamp_ticks),TRACE_EVENT_RESUMED);//ticks2ns(now_ticks),TRACE_EVENT_RESUMED);
       }
     }
   }
@@ -1989,7 +2007,7 @@ void stop(int rid)
   }
 
   if (readyq == &reserve_table[rid]){
-    add_trace_record(rid,ticks2ns(now_ticks),TRACE_EVENT_PREEMPTED);
+    add_trace_record(rid,ticks2ns(kernel_entry_timestamp_ticks),TRACE_EVENT_PREEMPTED);//ticks2ns(now_ticks),TRACE_EVENT_PREEMPTED);
     if(readyq != NULL) {
       //readyq->stop_ns = now_ns;
       readyq->stop_ticks = now_ticks;
@@ -2024,7 +2042,7 @@ void stop(int rid)
       if (need_enforcement){
       	budget_enforcement(readyq->rid,1);
       }
-      add_trace_record(readyq->rid,ticks2ns(now_ticks),TRACE_EVENT_RESUMED);
+      add_trace_record(readyq->rid,ticks2ns(kernel_entry_timestamp_ticks),TRACE_EVENT_RESUMED);//ticks2ns(now_ticks),TRACE_EVENT_RESUMED);
     }
 
     /* if (need_enforcement){ */
@@ -2080,15 +2098,13 @@ int wait_for_next_period(int rid, int nowait)
   
   departure_start_timestamp_ticks = get_now_ticks();
 
-  add_trace_record(rid, ticks2ns(departure_start_timestamp_ticks), TRACE_EVENT_WFNP);
+  add_trace_record(rid, ticks2ns(kernel_entry_timestamp_ticks), TRACE_EVENT_WFNP);//ticks2ns(departure_start_timestamp_ticks), TRACE_EVENT_WFNP);
 
   if (reserve_table[rid].hypertask_active){
     // cancel hyper_task
-    /* if(!hypmtscheduler_disablehyptask(reserve_table[rid].hyptask_handle)){ */
-    /*   printk("ZSRMV.wait_next_period(): error calling the hypertask disable\n"); */
-    /* /\* } else { *\/ */
-    /* /\*   printk("ZSRMV.wait_next_period(): called hypertask disable\n"); *\/ */
-    /* } */
+    if(!hypmtscheduler_disablehyptask(reserve_table[rid].hyptask_handle)){
+      printk("ZSRMV.wait_next_period(): error calling the hypertask disable\n");
+    }
   }
   
   hrtimer_cancel(&(reserve_table[rid].zero_slack_timer.kernel_timer));
@@ -2196,7 +2212,7 @@ int end_of_period(int rid)
 
   departure_start_timestamp_ticks = get_now_ticks();
 
-  add_trace_record(rid, ticks2ns(departure_start_timestamp_ticks), TRACE_EVENT_END_PERIOD);
+  add_trace_record(rid, ticks2ns(kernel_entry_timestamp_ticks), TRACE_EVENT_END_PERIOD);//ticks2ns(departure_start_timestamp_ticks), TRACE_EVENT_END_PERIOD);
   
   hrtimer_cancel(&(reserve_table[rid].zero_slack_timer.kernel_timer));
 
@@ -2289,7 +2305,7 @@ int wait_for_next_release(int rid)
 
   if (reserve_table[rid].end_of_period_marked){
     if (reserve_table[rid].num_period_wakeups <= 0 ){
-      add_trace_record(rid, ticks2ns(wait_arrival_timestamp_ticks), TRACE_EVENT_WAIT_RELEASE_BLOCKED);
+      add_trace_record(rid, ticks2ns(kernel_entry_timestamp_ticks), TRACE_EVENT_WAIT_RELEASE_BLOCKED);//ticks2ns(wait_arrival_timestamp_ticks), TRACE_EVENT_WAIT_RELEASE_BLOCKED);
 #ifdef __ZS_DEBUG__  
       printk("ZSRMMV: wait_next_period rid(%d) pid(%d) STOP\n",rid, current->pid);
 #endif  
@@ -2300,7 +2316,7 @@ int wait_for_next_release(int rid)
 #endif
     } else {
       // Continue executing & mark new start
-      add_trace_record(rid, ticks2ns(wait_arrival_timestamp_ticks), TRACE_EVENT_WAIT_RELEASE_NOT_BLOCKED);
+      add_trace_record(rid, ticks2ns(kernel_entry_timestamp_ticks), TRACE_EVENT_WAIT_RELEASE_NOT_BLOCKED);//ticks2ns(wait_arrival_timestamp_ticks), TRACE_EVENT_WAIT_RELEASE_NOT_BLOCKED);
       start_stac(rid);
     }
     
@@ -2601,6 +2617,9 @@ static void scheduler_task(void *a){
   while (!kthread_should_stop()) {
     // prevent concurrent execution with interrupts
     spin_lock_irqsave(&zsrmlock,flags);
+
+    kernel_entry_timestamp_ticks = get_now_ticks();
+  
     prevlocker = SCHED_TASK;
     while ((rid = pop_to_reschedule()) != -1) {
       if (reserve_table[rid].request_stop){
@@ -2756,22 +2775,45 @@ static void activator_task(void *a)
       /* end_tick = sysreg_read_cntpct(); */
       
       /* printk("ZSRMV.activator_task(): cycle counter test (for-loop 1000) start(%llu) end(%llu) count=%llu\n",start_tick, end_tick, (end_tick-start_tick)); */
-     
-      reserve_table[rid].hypertask_active=0;
-      if (reserve_table[rid].period.tv_sec != reserve_table[rid].hyp_enforcer_instant.tv_sec ||
-	  reserve_table[rid].period.tv_nsec != reserve_table[rid].hyp_enforcer_instant.tv_nsec){
-	/* if(!hypmtscheduler_createhyptask(reserve_table[rid].hyp_enforcer_instant.tv_sec * HYPMTSCHEDULER_TIME_1SEC + */
-	/* 				 (reserve_table[rid].hyp_enforcer_instant.tv_nsec / 1000) * HYPMTSCHEDULER_TIME_1USEC, */
-	/* 				 reserve_table[rid].period.tv_sec * HYPMTSCHEDULER_TIME_1SEC + */
-	/* 				 (reserve_table[rid].period.tv_nsec / 1000) * HYPMTSCHEDULER_TIME_1USEC, */
-	/* 				 p.sched_priority, // priority */
-	/* 				 3, // hyptask_id? */
-	/* 				 &(reserve_table[rid].hyptask_handle))){ */
-	/*   printk(KERN_INFO "ZSRMV.activator_task(): hypmtschedulerkmod: create_hyptask failed\n"); */
-	/* } else { */
-	/*   reserve_table[rid].hypertask_active=1; */
-	/*   printk("ZSRMV.activator_task(): hyptscheduler_createhyptask() SUCCESSFUL\n"); */
-	/* } */
+
+      /** 
+       *  I should not "re-create" the hypertask if it was already created
+       */      
+      //reserve_table[rid].hypertask_active=0;
+      
+      /* if (reserve_table[rid].period.tv_sec != reserve_table[rid].hyp_enforcer_instant.tv_sec || */
+      /* 	  reserve_table[rid].period.tv_nsec != reserve_table[rid].hyp_enforcer_instant.tv_nsec){ */
+
+      if (!reserve_table[rid].hypertask_active){
+	/* printk("ZSRMV: createhyptask FIRST PERIOD: (%u) (0x%08x) cyclecount : REGULAR PERIOD (%u) (0x%08x)\n", */
+	/*        (reserve_table[rid].hyp_enforcer_instant.tv_sec * HYPMTSCHEDULER_TIME_1SEC + */
+	/* 	(reserve_table[rid].hyp_enforcer_instant.tv_nsec / 1000) * HYPMTSCHEDULER_TIME_1USEC), */
+	/*        (reserve_table[rid].hyp_enforcer_instant.tv_sec * HYPMTSCHEDULER_TIME_1SEC + */
+	/* 	(reserve_table[rid].hyp_enforcer_instant.tv_nsec / 1000) * HYPMTSCHEDULER_TIME_1USEC), */
+	/*        (reserve_table[rid].period.tv_sec * HYPMTSCHEDULER_TIME_1SEC + */
+	/* 	(reserve_table[rid].period.tv_nsec / 1000) * HYPMTSCHEDULER_TIME_1USEC), */
+	/*        (reserve_table[rid].period.tv_sec * HYPMTSCHEDULER_TIME_1SEC + */
+	/* 	(reserve_table[rid].period.tv_nsec / 1000) * HYPMTSCHEDULER_TIME_1USEC)); */
+
+
+	/**
+	 * TODO:
+	 *   *** UGLY HACK ***
+	 * At this point we use the reserve id as the hypertask id as well. We may want to have a parameter pass down from the userspace
+	 * 
+	 */
+	if(!hypmtscheduler_createhyptask(reserve_table[rid].hyp_enforcer_instant.tv_sec * HYPMTSCHEDULER_TIME_1SEC +
+					 (reserve_table[rid].hyp_enforcer_instant.tv_nsec / 1000) * HYPMTSCHEDULER_TIME_1USEC,
+					 reserve_table[rid].period.tv_sec * HYPMTSCHEDULER_TIME_1SEC +
+					 (reserve_table[rid].period.tv_nsec / 1000) * HYPMTSCHEDULER_TIME_1USEC,
+					 p.sched_priority, // priority
+					 rid, // 3, // hyptask_id?
+					 &(reserve_table[rid].hyptask_handle))){
+	  printk(KERN_INFO "ZSRMV.activator_task(): hypmtschedulerkmod: create_hyptask failed\n");
+	} else {
+	  reserve_table[rid].hypertask_active=1;
+	  printk("ZSRMV.activator_task(): hyptscheduler_createhyptask() SUCCESSFUL\n");
+	}
       }      
     }    
     set_current_state(TASK_INTERRUPTIBLE);
@@ -2780,47 +2822,86 @@ static void activator_task(void *a)
 }
 
 
-int long long ticksperus=0L;
+/**
+ *  TICKS TO NS FUNCTIONS
+ */
+
+unsigned long long ticksperus=0L;
 
 
-void set_ticksperus(int long long ticks, int long long nanos){
+void set_ticksperus(unsigned long long ticks, unsigned long long nanos){
+#ifdef __ZS_USE_SYSTSC__
+  ticksperus = rdcntfrq();
+  printk("ZSRMV: set_ticksperus(): rdcntfrq(%llu)\n",ticksperus);
+  ticksperus = DIV(ticksperus, 1000000UL);
+  printk("ZSRMV. ticksperus=%llu\n",ticksperus);
+#else  
+  
   ticksperus = ticks *1000;
+  //ticksperus = ticks *10;
   ticksperus = DIV(ticksperus,nanos);
+  printk("ZSRMV: ticksperus: ticks(%llu) nanos(%llu) ticksperus(%llu)\n",ticks, nanos, ticksperus);
   /* ticksperus = ticksperus / nanos; */
+#endif
 }
 
 unsigned long long ticks2ns(unsigned long long ticks)
-#if LINUX_VERSION_CODE > KERNEL_VERSION(4,4,6)
 {
-  return ticks;
+  return ticks; //ticks2ns1(ticks);
 }
-#else
+
+/* unsigned long long ticks2ns1(unsigned long long ticks) */
+/* #if LINUX_VERSION_CODE > KERNEL_VERSION(4,4,6) */
+/* { */
+/*   return ticks; */
+/* } */
+/* #else */
+
+  
+unsigned long long ticks2ns1(unsigned long long ticks) 
 {
+
+/* #ifdef __ZS_USE_TSC__   */
+#ifdef __ZS_USE_SYSTSC__
   unsigned long long ns;
 
   ns = ticks*1000;
+  //ns = ticks*10;
   ns = DIV(ns,ticksperus);
   //ns = ns / ticksperus;
 
   return ns;
-}
+#else
+  return ticks;
 #endif
+  
+}
+/* #endif */
 
 unsigned long long ns2ticks(unsigned long long ns)
-#if LINUX_VERSION_CODE > KERNEL_VERSION(4,4,6)
+/* #if LINUX_VERSION_CODE > KERNEL_VERSION(4,4,6) */
+/* { */
+/*   return ns; */
+/* } */
+/* #else */
 {
-  return ns;
-}
-#else
-{  unsigned long long ticks;
+
+  //#ifdef __ZS_USE_TSC__
+#ifdef __ZS_USE_SYSTSC__
+
+  unsigned long long ticks;
 
   ticks = ns * ticksperus;
   ticks = DIV(ticks,1000);
+  //ticks = DIV(ticks,10);
   //ticks = ticks / 1000;
 
   return ticks;
-}
+#else
+  return ns;
 #endif
+}
+/* #endif */
 
 void setup_ticksclock(void)
 #ifdef STAC_FRAMAC_STUBS
@@ -2831,20 +2912,34 @@ void setup_ticksclock(void)
 #else
 #if LINUX_VERSION_CODE > KERNEL_VERSION(4,4,6)
 {
-  /* u64 start_cycles,end_cycles; */
-  /* unsigned long long start_ns,i,end_ns; */
 
-  /* hypmtscheduler_getrawtick64(&start_cycles); */
+  //#ifdef __ZS_USE_TSC__
+#ifdef __ZS_USE_SYSTSC__
+  u64 start_cycles,end_cycles;
+  unsigned long long start_ns,i,end_ns;
+
+  //hypmtscheduler_getrawtick64(&start_cycles);
+  // start_cycles = rdtsc64();
+  start_cycles = sysreg_read_cntpct();
   
-  /* start_ns = get_now_ns(); */
+  start_ns = get_now_ns();
+
+  msleep(100);
+  
   /* while (i<10000000){ */
-  /*   i = get_now_ns() - start_ns; */
+  /*   i = start_ns + i +1;//get_now_ns() - start_ns; */
   /* } */
-  /* end_ns = get_now_ns(); */
 
-  /* hypmtscheduler_getrawtick64(&end_cycles); */
+    
+  end_ns = get_now_ns();
 
-  /* set_ticksperus(end_cycles-start_cycles,end_ns-start_ns); */
+  //hypmtscheduler_getrawtick64(&end_cycles);
+  //end_cycles = rdtsc64();
+  end_cycles = sysreg_read_cntpct();
+
+  set_ticksperus(end_cycles-start_cycles,end_ns-start_ns);
+#endif
+  
 }
 #else
 {
@@ -2893,14 +2988,20 @@ unsigned long long get_now_ticks(void)
 #else
 #if LINUX_VERSION_CODE > KERNEL_VERSION(4,4,6)
 {
-  /* u64 t; */
 
-  /* hypmtscheduler_getrawtick64(&t); */
-  /* return t; */
+  //#ifdef __ZS_USE_TSC__
+#ifdef __ZS_USE_SYSTSC__
+
+  u64 t;
+  t= sysreg_read_cntpct();
+  //t = rdtsc64();
+  return t;
+#else
 
   ktime_t t;
   t =ktime_get_raw();
   return (unsigned long long) ktime_to_ns(t);
+#endif
 }
 #else
 {
@@ -2926,6 +3027,60 @@ static int zsrm_release(struct inode *inode, struct file *filp)
 }
 
 
+int test_reserve(int option)
+{
+    static uint32_t hyptask_handle1; 
+    static uint32_t hyptask_handle2; 
+
+    switch (option){
+    case 0:
+      if(!hypmtscheduler_createhyptask(1 * HYPMTSCHEDULER_TIME_1SEC, // first time
+				       //+X * HYPMTSCHEDULER_TIME_1USEC,
+				       2 * HYPMTSCHEDULER_TIME_1SEC, // sticky period
+				       //+ (reserve_table[rid].period.tv_nsec / 1000) * HYPMTSCHEDULER_TIME_1USEC,
+				   10, // priority
+				       0, //  hyptask_id
+				       &hyptask_handle1)){
+	printk(KERN_INFO "ZSRMV.test_reserve(): hypmtschedulerkmod: create_hyptask1 failed\n");
+      } else {
+	printk(KERN_INFO "ZSRMV.test_reserve(): hyptask1 created\n");
+      } 
+
+      if(!hypmtscheduler_createhyptask(//1 * HYPMTSCHEDULER_TIME_1SEC, // first time
+				       500000 * HYPMTSCHEDULER_TIME_1USEC,
+				       1 * HYPMTSCHEDULER_TIME_1SEC, // sticky period
+				       //+ (reserve_table[rid].period.tv_nsec / 1000) * HYPMTSCHEDULER_TIME_1USEC,
+				       11, // priority
+				       1, //  hyptask_id
+				       &hyptask_handle2)){
+	printk(KERN_INFO "ZSRMV.test_reserve(): hypmtschedulerkmod: create_hyptask2 failed\n");
+      } else {
+	printk(KERN_INFO "ZSRMV.test_reserve(): hyptask2 created\n");
+      } 
+
+      break;
+    case 1:
+	if(!hypmtscheduler_deletehyptask(hyptask_handle1)){
+	  printk("ZSRMV.test_reserve(): error deleting hypertask1\n");
+	} else {
+	  printk("ZSRMV.test_reserve(): hypertask1 deleted\n");
+	}
+
+	if(!hypmtscheduler_deletehyptask(hyptask_handle2)){
+	  printk("ZSRMV.test_reserve(): error deleting hypertask2\n");
+	} else {
+	  printk("ZSRMV.test_reserve(): hypertask2 deleted\n");
+	}
+
+      break;
+    default:
+	printk("ZSRMV.test_reserve(): wrong option\n");
+	break;
+    }
+    
+  return 0;
+}
+
 
 static ssize_t zsrm_read(struct file *filp,	/* see include/linux/fs.h   */
 			   char *buffer,	/* buffer to fill with data */
@@ -2933,6 +3088,16 @@ static ssize_t zsrm_read(struct file *filp,	/* see include/linux/fs.h   */
 			   loff_t * offset)
 {
   int transfer_size;
+  int i;
+  
+  // Copy the hypervisor log into the zsrm trace log
+  if(!hypmtscheduler_dumpdebuglog(&debug_log, &debug_log_buffer_index)){
+    printk(KERN_INFO "ZSRMV: dumpdebuglog hypercall API failed\n");
+  } else {
+    for (i = 0; i< debug_log_buffer_index; i++){
+      add_trace_record(debug_log[i].hyptask_id, debug_log[i].timestamp, debug_log[i].event_type);
+    }
+  }
 
   transfer_size = (length >= (trace_index * sizeof(struct trace_rec_t))) ?
     (trace_index * sizeof(struct trace_rec_t)) :
@@ -2989,11 +3154,18 @@ static ssize_t zsrm_write
   // disable interrupts to avoid concurrent interrupts
   spin_lock_irqsave(&zsrmlock,flags);
 
+  kernel_entry_timestamp_ticks = get_now_ticks();
+
+  
   // *** DEBUG LOCKER
   prevlocker = ZSV_CALL;
   zsrmcall = call.cmd;
   
   switch (call.cmd) {
+  case TEST_RESERVE:
+    ret = test_reserve(call.rid);
+    need_reschedule = 0;
+    break;
   case END_PERIOD:
     if (!active_rid(call.rid)){
       printk("ZSRMMV.write() ERROR got cmd(%s) with invalid/inactive rid(%d)\n",
@@ -3224,6 +3396,9 @@ static int __init zsrm_init(void)
   struct device *device = NULL;
   struct sched_param p;
 
+  unsigned long long start_ns;
+  unsigned long long end_ns;
+
   /* u64 start_tick; */
   /* u64 end_tick; */
   int cnt;
@@ -3309,20 +3484,25 @@ static int __init zsrm_init(void)
   
   kthread_bind(active_task, 0);
 
+  init_cputsc();
+
+  //hypmtscheduler_inittsc();
 
   setup_ticksclock();
 
   /* start_tick = sysreg_read_cntpct(); */
   /* hypmtscheduler_getrawtick64(&start_tick); */
-  start_tick =  hypmtscheduler_readtsc64();
+  start_tick =  get_now_ticks(); //rdtsc64();
+  start_ns = get_now_ns();
 
-  for (cnt =0 ; cnt <1000;cnt++)
+  for (cnt =0 ; cnt <100000;cnt++)
     ret=cnt+1;
-  end_tick =  hypmtscheduler_readtsc64();
+  end_ns = get_now_ns();
+  end_tick =  get_now_ticks(); //rdtsc64();
   /* end_tick = sysreg_read_cntpct(); */
   /* hypmtscheduler_getrawtick64(&end_tick); */
 
-  printk("ZSRMV: cycle counter test (for-loop 1000) start(%llu) end(%llu) count=%llu\n",start_tick, end_tick, (end_tick-start_tick));
+  printk("ZSRMV: cycle counter test (for-loop 1000) start(%llu) end(%llu) count(%llu) count_ns(%llu) elapsed_ns(%llu) \n",start_tick, end_tick, (end_tick-start_tick), ticks2ns(end_tick-start_tick), (end_ns-start_ns));
   
   printk(KERN_WARNING "ZSRMMV: ready!\n");
     
@@ -3401,7 +3581,7 @@ static void __exit zsrm_exit(void)
 
   print_overhead_stats();
 
-  end_tick = sysreg_read_cntpct();
+  end_tick = sysreg_read_cntpct(); //rdtsc64();
   printk("ZSRMV: cycle counter test start(%llu) end(%llu) count=%llu\n",start_tick, end_tick, (end_tick-start_tick));
   
   printk(KERN_INFO "ZSRMMV: GOODBYE!\n");

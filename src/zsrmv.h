@@ -121,7 +121,7 @@ struct reserve {
   struct timespec execution_time;
   struct timespec nominal_execution_time;
   int hypertask_active;
-  u32 hyptask_handle;
+  uint32_t hyptask_handle; // u32
   int priority;
   int criticality;
   int in_critical_mode;

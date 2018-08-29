@@ -1,2 +1,2 @@
-// pi3-1.2GHz
-#define IN_LOOP_ONE_MS 70575
+// RP3-600MHZ
+#define IN_LOOP_ONE_MS 32710
