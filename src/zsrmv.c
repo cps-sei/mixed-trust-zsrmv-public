@@ -3118,6 +3118,9 @@ static ssize_t zsrm_read(struct file *filp,	/* see include/linux/fs.h   */
   int transfer_size;
   int i;
   
+  //zero-initialize debug_log
+  memset(&debug_log, 0, sizeof(debug_log));
+
   // Copy the hypervisor log into the zsrm trace log
   if(!hypmtscheduler_dumpdebuglog(&debug_log, &debug_log_buffer_index)){
     printk(KERN_INFO "ZSRMV: dumpdebuglog hypercall API failed\n");
