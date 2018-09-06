@@ -2826,10 +2826,13 @@ static void activator_task(void *a)
 	 * At this point we use the reserve id as the hypertask id as well. We may want to have a parameter pass down from the userspace
 	 * 
 	 */
-	if(!hypmtscheduler_createhyptask(reserve_table[rid].hyp_enforcer_instant.tv_sec * HYPMTSCHEDULER_TIME_1SEC +
-					 (reserve_table[rid].hyp_enforcer_instant.tv_nsec / 1000) * HYPMTSCHEDULER_TIME_1USEC,
-					 reserve_table[rid].period.tv_sec * HYPMTSCHEDULER_TIME_1SEC +
-					 (reserve_table[rid].period.tv_nsec / 1000) * HYPMTSCHEDULER_TIME_1USEC,
+	if(!hypmtscheduler_createhyptask(
+			reserve_table[rid].hyp_enforcer_instant.tv_sec * HYPMTSCHEDULER_TIME_1SEC +
+					 (reserve_table[rid].hyp_enforcer_instant.tv_nsec / (1000 * 1000)) * HYPMTSCHEDULER_TIME_1MSEC,
+
+				reserve_table[rid].period.tv_sec * HYPMTSCHEDULER_TIME_1SEC +
+					 (reserve_table[rid].period.tv_nsec / (1000 * 1000)) * HYPMTSCHEDULER_TIME_1MSEC,
+
 					 p.sched_priority, // priority
 					 rid, // 3, // hyptask_id?
 					 &(reserve_table[rid].hyptask_handle))){
