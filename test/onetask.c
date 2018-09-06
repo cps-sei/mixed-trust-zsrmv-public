@@ -97,18 +97,18 @@ int main(int argc, char *argv[])
 
 #if 1
   if ((rid = zsv_create_reserve(schedfd,
-				0, // period_secs
-				500000000, // period_nsecs
-				0, // zsinstant_sec -- same as period = disabled
-				500000000, // zsinstant_nsec -- same as period = disabled
-				0, // hypertask enforcement sec
-				750000000, // hypertask enforcement nsec
-				0, // exectime _secs
-				300000000, // exectime_nsecs
-				0, // nominal_exectime_sec -- same as overloaded
-				300000000, // nominal_exectime_nsec -- same as overloaded
-				10, // priority
-				1  // criticality
+			1, // period_secs
+			0, // period_nsecs
+			1, // zsinstant_sec -- same as period = disabled
+			0, // zsinstant_nsec -- same as period = disabled
+			0, // hypertask enforcement sec
+			500000000, // hypertask enforcement nsec
+			0, // exectime _secs
+			150000000, // exectime_nsecs
+			0, // nominal_exectime_sec -- same as overloaded
+			150000000, // nominal_exectime_nsec -- same as overloaded
+			10, // priority
+			1  // criticality
 				)
        )<0){
     printf("error calling create reserve\n");
@@ -156,11 +156,11 @@ int main(int argc, char *argv[])
 
   for (i=0;i<10;i++){
     if (i == 5){
-      busy_timestamped(700, timestamp1, TS_BUFFER_SIZE, &tsindex1);
+      busy_timestamped(100, timestamp1, TS_BUFFER_SIZE, &tsindex1);
     } else if (i == 7) {
-      busy_timestamped(3000, timestamp1, TS_BUFFER_SIZE, &tsindex1);
+      busy_timestamped(500, timestamp1, TS_BUFFER_SIZE, &tsindex1);
     } else {
-      busy_timestamped(150, timestamp1, TS_BUFFER_SIZE, &tsindex1);
+      busy_timestamped(200, timestamp1, TS_BUFFER_SIZE, &tsindex1);
     }
     if (enforced){
       printf("USER: enforced -- should not complete?\n");
