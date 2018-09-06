@@ -95,7 +95,7 @@ int main(int argc, char *argv[])
     return -1;
   }
 
-#if 0
+#if 1
   if ((rid = zsv_create_reserve(schedfd,
 				0, // period_secs
 				500000000, // period_nsecs
