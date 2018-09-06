@@ -325,7 +325,7 @@ unsigned long long get_now_ticks(void);
 int getreserve(void);
 void budget_enforcement(int rid, int request_stop);
 void start_of_period(int rid);
-void timer_handler(struct zs_timer *timer);
+int timer_handler(struct zs_timer *timer);
 int add_timerq(struct zs_timer *t);
 int attach_reserve(int rid, int pid);
 int start_enforcement_timer(struct reserve *rsvp);
@@ -1334,7 +1334,13 @@ void start_of_period(int rid)
   // cancel the zero_slack timer just in case it is still active
   hrtimer_cancel(&(reserve_table[rid].zero_slack_timer.kernel_timer));
   add_timerq(&reserve_table[rid].zero_slack_timer);
-  add_timerq(&reserve_table[rid].period_timer);
+
+  /**
+   * Now instead of programming the periodic timer at every period, we program it 
+   * at reserve attachement and just request to be reprogrammed with HRTIMER_RESTART
+   */
+  
+  //add_timerq(&reserve_table[rid].period_timer);
 
   if (reserve_table[rid].criticality < sys_criticality){
     // should not start given that its criticality is lower
@@ -1463,9 +1469,14 @@ void zs_enforcement(int rid)
   @ensures fp31 && fp32 && zsrm_lem1 && zsrm1 && zsrm2 && zsrm3 && zsrm4 && zsrm7;
 */
 /*********************************************************************/
-void timer_handler(struct zs_timer *timer)
+int timer_handler(struct zs_timer *timer)
 {
+  // returns 1 if HRTIMER should restart, 0 otherwise
+  int restart_timer;
+  
   kernel_entry_timestamp_ticks = get_now_ticks();
+
+  restart_timer = 0;
   
   // process the timer
 #ifdef __ZS_DEBUG__  
@@ -1486,6 +1497,7 @@ void timer_handler(struct zs_timer *timer)
 	break;
       case TIMER_PERIOD:
 	start_of_period(timer->rid);
+	restart_timer = 1;
 	break;
       case TIMER_ZS_ENF:
 	zs_enforcement(timer->rid);
@@ -1508,6 +1520,8 @@ void timer_handler(struct zs_timer *timer)
       wake_up_process(sched_task);
     }
   }
+
+  return restart_timer;
 }
 
 /*********************************************************************/
@@ -2542,6 +2556,9 @@ enum hrtimer_restart kernel_timer_handler(struct hrtimer *ktimer){
   struct zs_timer *zstimer;
   int tries;
   int locked=0;
+  int restart_timer=0;
+  enum hrtimer_restart krestart = HRTIMER_NORESTART;
+  ktime_t kinterval;
 
   // *** DEBUGGING ONLY
 
@@ -2566,13 +2583,20 @@ enum hrtimer_restart kernel_timer_handler(struct hrtimer *ktimer){
   prevlocker = zstimer->timer_type;
   
   if (zstimer != NULL){
-    timer_handler(zstimer);
+    restart_timer = timer_handler(zstimer);
+    if (restart_timer){
+      krestart = HRTIMER_RESTART;
+      kinterval = ns_to_ktime(zstimer->absolute_expiration_ns);
+      hrtimer_forward_now(ktimer, kinterval);
+    } else {
+      krestart = HRTIMER_NORESTART;
+    }
   } else {
     printk("ZSRMV: kernel_timer_handler: zstimer == NULL\n");
   }
   
   spin_unlock_irqrestore(&zsrmlock,flags);
-  return HRTIMER_NORESTART;
+  return krestart; //HRTIMER_NORESTART;
 }
 
 int reschedule_stack[MAX_RESERVES];

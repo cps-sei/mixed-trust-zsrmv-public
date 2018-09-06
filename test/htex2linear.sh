@@ -1,0 +1,2 @@
+#!/bin/sh
+gawk  '/HYPTASKBEFOREEXEC/ { gsub(/ /,"",$0) ; linea = $0; getline ; gsub(/ /,"",$0) ; lineb=$0 ; if (lineb != "") { getline; gsub(/ /,"",$0) ; linec=$0 ; print linea lineb linec} else { print linea } } /HYPTASKAFTEREXEC/ { gsub(/ /,"",$0) ; linea = $0; getline ; gsub(/ /,"",$0) ; lineb=$0 ; if (lineb != "") { getline; gsub(/ /,"",$0) ; linec=$0 ; print linea lineb linec} else { print linea } }' $1
