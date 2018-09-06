@@ -3120,7 +3120,9 @@ static ssize_t zsrm_read(struct file *filp,	/* see include/linux/fs.h   */
 {
   int transfer_size;
   int i;
-  
+
+  printk(KERN_INFO "ZSRMV: dumptrace: trace_index=%u\n", trace_index);
+
   //zero-initialize debug_log
   memset(&debug_log, 0, sizeof(debug_log));
 
@@ -3133,6 +3135,8 @@ static ssize_t zsrm_read(struct file *filp,	/* see include/linux/fs.h   */
       add_trace_record(debug_log[i].hyptask_id, debug_log[i].timestamp, debug_log[i].event_type);
     }
   }
+
+  printk(KERN_INFO "ZSRMV: dumptrace: trace_index=%u\n", trace_index);
 
   transfer_size = (length >= (trace_index * sizeof(struct trace_rec_t))) ?
     (trace_index * sizeof(struct trace_rec_t)) :
