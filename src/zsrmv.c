@@ -3122,7 +3122,8 @@ static ssize_t zsrm_read(struct file *filp,	/* see include/linux/fs.h   */
   if(!hypmtscheduler_dumpdebuglog(&debug_log, &debug_log_buffer_index)){
     printk(KERN_INFO "ZSRMV: dumpdebuglog hypercall API failed\n");
   } else {
-    for (i = 0; i< debug_log_buffer_index; i++){
+    printk(KERN_INFO "ZSRMV: dumpdebuglog: total entries=%u\n", debug_log_buffer_index);
+	for (i = 0; i< debug_log_buffer_index; i++){
       add_trace_record(debug_log[i].hyptask_id, debug_log[i].timestamp, debug_log[i].event_type);
     }
   }
