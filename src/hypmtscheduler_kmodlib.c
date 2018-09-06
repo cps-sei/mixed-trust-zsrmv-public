@@ -42,7 +42,7 @@
 #include <asm/uaccess.h>          // required for the copy to user function
 #include <asm/io.h>          // required for the copy to user function
 
-#include <hypmtscheduler.h>
+#include "hypmtscheduler.h"
 
 
 void __hvc(u32 uhcall_function, void *uhcall_buffer,
