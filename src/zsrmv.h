@@ -79,6 +79,8 @@ struct reserve {
 #endif
   pid_t  pid;
   int rid;
+  unsigned long long first_job_activation_ns;
+  unsigned long long job_activation_count;
   unsigned long long start_ns;
   unsigned long long stop_ns;
   unsigned long long current_exectime_ns;

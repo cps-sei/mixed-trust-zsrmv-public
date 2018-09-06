@@ -1335,12 +1335,15 @@ void start_of_period(int rid)
   hrtimer_cancel(&(reserve_table[rid].zero_slack_timer.kernel_timer));
   add_timerq(&reserve_table[rid].zero_slack_timer);
 
+  // increment the number of jobs activated
+  reserve_table[rid].job_activation_count ++;
+
   /**
    * Now instead of programming the periodic timer at every period, we program it 
    * at reserve attachement and just request to be reprogrammed with HRTIMER_RESTART
    */
   
-  //add_timerq(&reserve_table[rid].period_timer);
+  add_timerq(&reserve_table[rid].period_timer);
 
   if (reserve_table[rid].criticality < sys_criticality){
     // should not start given that its criticality is lower
@@ -1597,6 +1600,9 @@ int attach_reserve(int rid, int pid)
 
   add_trace_record(rid,ticks2ns(kernel_entry_timestamp_ticks),TRACE_EVENT_START_PERIOD);//ticks2ns(get_now_ticks()),TRACE_EVENT_START_PERIOD);
 
+  // record the first activation
+  reserve_table[rid].first_job_activation_ns = ktime_to_ns(ktime_get());// ticks2ns(kernel_entry_timestamp_ticks);
+  reserve_table[rid].job_activation_count++;
   
   calling_start_from = 2;
   start_stac(rid);
@@ -2403,6 +2409,8 @@ void init(void)
       reserve_table[j].enforcement_timer.rid == j)) && zsrm_lem1;
     @loop assigns i,reserve_table[0..(maxReserves-1)];*/
   for (i=0;i<MAX_RESERVES;i++) {
+    reserve_table[i].first_job_activation_ns=0L;
+    reserve_table[i].job_activation_count=0L;
     reserve_table[i].enforcement_type = ENF_NONE;
     reserve_table[i].task_namespace=NULL;
     reserve_table[i].pid=-1;
@@ -2450,6 +2458,8 @@ void init(void)
 
 void init_reserve(int rid)
 {
+  reserve_table[rid].first_job_activation_ns=0L;
+  reserve_table[rid].job_activation_count=0L;
   reserve_table[rid].task_namespace=NULL;
   reserve_table[rid].num_wfnp=0;
   reserve_table[rid].non_periodic_wait=0;
@@ -2559,6 +2569,8 @@ enum hrtimer_restart kernel_timer_handler(struct hrtimer *ktimer){
   int restart_timer=0;
   enum hrtimer_restart krestart = HRTIMER_NORESTART;
   ktime_t kinterval;
+  ktime_t kabsexpiration;
+  unsigned long long abs_expiration_ns;
 
   // *** DEBUGGING ONLY
 
@@ -2585,9 +2597,15 @@ enum hrtimer_restart kernel_timer_handler(struct hrtimer *ktimer){
   if (zstimer != NULL){
     restart_timer = timer_handler(zstimer);
     if (restart_timer){
-      krestart = HRTIMER_RESTART;
-      kinterval = ns_to_ktime(zstimer->absolute_expiration_ns);
-      hrtimer_forward_now(ktimer, kinterval);
+      zstimer->absolute_expiration_ns = zstimer->expiration.tv_sec * 1000000000L + zstimer->expiration.tv_nsec;
+      abs_expiration_ns = reserve_table[zstimer->rid].first_job_activation_ns +
+      	(zstimer->absolute_expiration_ns * reserve_table[zstimer->rid].job_activation_count);
+      kabsexpiration = ns_to_ktime(abs_expiration_ns);
+      hrtimer_start(ktimer, kabsexpiration, HRTIMER_MODE_ABS);
+      krestart = HRTIMER_NORESTART;
+      /* krestart = HRTIMER_RESTART; */
+      /* kinterval = ns_to_ktime(zstimer->absolute_expiration_ns); */
+      /* hrtimer_forward_now(ktimer, kinterval); */
     } else {
       krestart = HRTIMER_NORESTART;
     }
