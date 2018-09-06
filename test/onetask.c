@@ -10,9 +10,9 @@ following conditions are met:
 acknowledgments and disclaimers.
 2. Redistributions in binary form must reproduce the above copyright notice, this list of conditions and the following 
 acknowledgments and disclaimers in the documentation and/or other materials provided with the distribution.
-3. Products derived from this software may not include “Carnegie Mellon University,” "SEI” and/or “Software 
-Engineering Institute" in the name of such derived product, nor shall “Carnegie Mellon University,” "SEI” and/or 
-“Software Engineering Institute" be used to endorse or promote products derived from this software without prior 
+3. Products derived from this software may not include â€œCarnegie Mellon University,â€� "SEIâ€� and/or â€œSoftware
+Engineering Institute" in the name of such derived product, nor shall â€œCarnegie Mellon University,â€� "SEIâ€� and/or
+â€œSoftware Engineering Institute" be used to endorse or promote products derived from this software without prior
 written permission. For written permission, please contact permission@sei.cmu.edu.
 
 ACKNOWLEDMENTS AND DISCLAIMERS:
@@ -26,7 +26,7 @@ do not necessarily reflect the views of the United States Department of Defense.
 
 NO WARRANTY. 
 THIS CARNEGIE MELLON UNIVERSITY AND SOFTWARE ENGINEERING INSTITUTE 
-MATERIAL IS FURNISHED ON AN “AS-IS” BASIS. CARNEGIE MELLON UNIVERSITY MAKES NO 
+MATERIAL IS FURNISHED ON AN â€œAS-ISâ€� BASIS. CARNEGIE MELLON UNIVERSITY MAKES NO
 WARRANTIES OF ANY KIND, EITHER EXPRESSED OR IMPLIED, AS TO ANY MATTER INCLUDING, 
 BUT NOT LIMITED TO, WARRANTY OF FITNESS FOR PURPOSE OR MERCHANTABILITY, 
 EXCLUSIVITY, OR RESULTS OBTAINED FROM USE OF THE MATERIAL. CARNEGIE MELLON 
@@ -34,7 +34,7 @@ UNIVERSITY DOES NOT MAKE ANY WARRANTY OF ANY KIND WITH RESPECT TO FREEDOM FROM
 PATENT, TRADEMARK, OR COPYRIGHT INFRINGEMENT.
 
 This material has been approved for public release and unlimited distribution.
-Carnegie Mellon® is registered in the U.S. Patent and Trademark Office by Carnegie Mellon University.
+Carnegie MellonÂ® is registered in the U.S. Patent and Trademark Office by Carnegie Mellon University.
 
 DM-0000891
 */
@@ -60,6 +60,11 @@ DM-0000891
 #include <sys/shm.h>
 
 #include <zsrmvapi.h>
+
+#define HYPMTSCHEDULER_TIME_1SEC			19200000UL
+//#define HYPMTSCHEDULER_TIME_1SEC			15518102UL
+#define HYPMTSCHEDULER_TIME_1MSEC			(HYPMTSCHEDULER_TIME_1SEC / 1000)
+#define HYPMTSCHEDULER_TIME_1USEC			(HYPMTSCHEDULER_TIME_1MSEC / 1000)
 
 #define TS_BUFFER_SIZE 100000
 
@@ -90,6 +95,7 @@ int main(int argc, char *argv[])
     return -1;
   }
 
+#if 0
   if ((rid = zsv_create_reserve(schedfd,
 				0, // period_secs
 				500000000, // period_nsecs
@@ -103,11 +109,34 @@ int main(int argc, char *argv[])
 				300000000, // nominal_exectime_nsec -- same as overloaded
 				10, // priority
 				1  // criticality
+				)
+       )<0){
+    printf("error calling create reserve\n");
+    return -1;
+  }
+#else
+
+  if ((rid = zsv_create_reserve(schedfd,
+				0, // period_secs
+				0.5 * HYPMTSCHEDULER_TIME_1SEC, // period_nsecs
+				0, // zsinstant_sec -- same as period = disabled
+				0.5 * HYPMTSCHEDULER_TIME_1SEC, // zsinstant_nsec -- same as period = disabled
+				0, // hypertask enforcement sec
+				1 * HYPMTSCHEDULER_TIME_1SEC, // hypertask enforcement nsec
+				0, // exectime _secs
+				300000000, // exectime_nsecs
+				0, // nominal_exectime_sec -- same as overloaded
+				300000000, // nominal_exectime_nsec -- same as overloaded
+				10, // priority
+				1  // criticality
 				) 
        )<0){
     printf("error calling create reserve\n");
     return -1;
   }
+
+
+#endif
 
   /* TEST WITHOUT HANDLER
   if ((enffd = zsv_fork_enforcement_handler(schedfd, rid, enforcement_handler)) <0 ){
