@@ -42,7 +42,7 @@
 #include <asm/uaccess.h>          // required for the copy to user function
 #include <asm/io.h>          // required for the copy to user function
 
-#include "hypmtscheduler.h"
+#include <hypmtscheduler.h>
 
 
 void __hvc(u32 uhcall_function, void *uhcall_buffer,
@@ -329,8 +329,9 @@ bool hypmtscheduler_dumpdebuglog(u8 *dst_log_buffer, u32 *num_entries){
 	ugapp_hypmtscheduler_param_t *hmtsp;
 	struct page *hmtsp_page;
 	u32 hmtsp_paddr;
-	struct page *debug_log_buffer_page;
-	u32 debug_log_buffer_page_paddr;
+
+	struct page *debug_log_buffer_page[4];
+	u32 debug_log_buffer_page_paddr[4];
 
 	if(!dst_log_buffer || !num_entries){
 		return false;
@@ -338,7 +339,7 @@ bool hypmtscheduler_dumpdebuglog(u8 *dst_log_buffer, u32 *num_entries){
 
 	*num_entries=0;
 
-	//allocate physical page for parameter passing
+	//allocate physical pag for parameter passing
 	hmtsp_page = alloc_page(GFP_KERNEL | __GFP_ZERO);
 
 	if(!hmtsp_page){
@@ -348,33 +349,55 @@ bool hypmtscheduler_dumpdebuglog(u8 *dst_log_buffer, u32 *num_entries){
 	hmtsp = (ugapp_hypmtscheduler_param_t *)page_address(hmtsp_page);
 
 
-	//allocate debug log buffer page and compute its physical address
-	debug_log_buffer_page = alloc_page(GFP_KERNEL | __GFP_ZERO);
+	//allocate debug log buffer pages and compute their physical addresses
+	debug_log_buffer_page[0] = alloc_page(GFP_KERNEL | __GFP_ZERO);
+	debug_log_buffer_page[1] = alloc_page(GFP_KERNEL | __GFP_ZERO);
+	debug_log_buffer_page[2] = alloc_page(GFP_KERNEL | __GFP_ZERO);
+	debug_log_buffer_page[3] = alloc_page(GFP_KERNEL | __GFP_ZERO);
 
-	if(!debug_log_buffer_page){
+	if(!debug_log_buffer_page[0] ||
+			!debug_log_buffer_page[1] ||
+			!debug_log_buffer_page[2] ||
+			!debug_log_buffer_page[3]){
 		return false;
 	}
 
-	debug_log_buffer_page_paddr = page_to_phys(debug_log_buffer_page);
+	debug_log_buffer_page_paddr[0] = page_to_phys(debug_log_buffer_page[0]);
+	debug_log_buffer_page_paddr[1] = page_to_phys(debug_log_buffer_page[1]);
+	debug_log_buffer_page_paddr[2] = page_to_phys(debug_log_buffer_page[2]);
+	debug_log_buffer_page_paddr[3] = page_to_phys(debug_log_buffer_page[3]);
 
 
 	hmtsp->uhcall_fn = UAPP_HYPMTSCHEDULER_UHCALL_DUMPDEBUGLOG;
-	hmtsp->iparam_1 = debug_log_buffer_page_paddr;
+
+	hmtsp->iparam_1 = debug_log_buffer_page_paddr[0];
+	hmtsp->iparam_2 = debug_log_buffer_page_paddr[1];
+	hmtsp->iparam_3 = debug_log_buffer_page_paddr[2];
+	hmtsp->iparam_4 = debug_log_buffer_page_paddr[3];
 
 	hmtsp_paddr = page_to_phys(hmtsp_page);
 	__hvc(UAPP_HYPMTSCHEDULER_UHCALL, hmtsp_paddr, sizeof(ugapp_hypmtscheduler_param_t));
 
 	if(!hmtsp->status){
-		__free_page(debug_log_buffer_page);
+		__free_page(debug_log_buffer_page[0]);
+		__free_page(debug_log_buffer_page[1]);
+		__free_page(debug_log_buffer_page[2]);
+		__free_page(debug_log_buffer_page[3]);
 		__free_page(hmtsp_page);
 		return false;
 	}
 
-	memcpy(dst_log_buffer, page_address(debug_log_buffer_page),
-			hmtsp->oparam_1 * sizeof(hypmtscheduler_logentry_t));
+	memcpy(dst_log_buffer+(4096*0), page_address(debug_log_buffer_page[0]), 4096);
+	memcpy(dst_log_buffer+(4096*1), page_address(debug_log_buffer_page[1]), 4096);
+	memcpy(dst_log_buffer+(4096*2), page_address(debug_log_buffer_page[2]), 4096);
+	memcpy(dst_log_buffer+(4096*3), page_address(debug_log_buffer_page[3]), 4096);
+
 	*num_entries = hmtsp->oparam_1;
 
-	__free_page(debug_log_buffer_page);
+	__free_page(debug_log_buffer_page[0]);
+	__free_page(debug_log_buffer_page[1]);
+	__free_page(debug_log_buffer_page[2]);
+	__free_page(debug_log_buffer_page[3]);
 	__free_page(hmtsp_page);
 	return true;
 }

@@ -106,7 +106,7 @@ typedef struct {
 	u32 event_type;
 } hypmtscheduler_logentry_t;
 
-#define DEBUG_LOG_SIZE (4096/sizeof(hypmtscheduler_logentry_t))
+#define DEBUG_LOG_SIZE (16384/sizeof(hypmtscheduler_logentry_t))
 
 
 #endif // __ASSEMBLY__
