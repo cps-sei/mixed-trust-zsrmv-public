@@ -3069,7 +3069,6 @@ int test_reserve(int option)
       } else {
 	printk(KERN_INFO "ZSRMV.test_reserve(): hyptask1 created\n");
       } 
-#if 1
 
     	if(!hypmtscheduler_createhyptask(//1 * HYPMTSCHEDULER_TIME_1SEC, // first time
 				       //500000 * HYPMTSCHEDULER_TIME_1USEC,
@@ -3083,7 +3082,6 @@ int test_reserve(int option)
       } else {
 	printk(KERN_INFO "ZSRMV.test_reserve(): hyptask2 created\n");
       } 
-#endif
 
       break;
     case 1:

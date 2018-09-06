@@ -39,7 +39,7 @@ int main(int argc, char *argv[])
   }
 
 
-  sleep(8);
+  sleep(15);
 
   if (zsv_test_reserve(schedfd, 1)<0){
     printf("error \n");
