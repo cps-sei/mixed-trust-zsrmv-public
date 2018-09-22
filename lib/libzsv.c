@@ -615,3 +615,53 @@ int zsv_test_reserve(int schedfd, int option)
   ret =  write(schedfd, &call, sizeof(call));
   return ret;
 }
+
+int zsv_mtserial_init(int schedfd, int bauds)
+{
+  struct api_call call;
+  int ret;
+
+  call.cmd=INIT_SERIAL;
+  call.rid = bauds;
+  ret =  write(schedfd, &call, sizeof(call));
+  return ret;
+}
+
+int zsv_mtserial_recv(int schedfd, int rid, void *buffer, int length)
+{
+  struct api_call call;
+  int ret;
+
+  call.cmd=RECV_SERIAL;
+  call.rid = rid;
+  call.buffer = buffer;
+  call.buf_len = length;
+  ret =  write(schedfd, &call, sizeof(call));
+  return ret;  
+}
+
+int zsv_mtserial_send(int schedfd, int rid, void *buffer, int length)
+{
+  struct api_call call;
+  int ret;
+
+  call.cmd=SEND_SERIAL;
+  call.rid = rid;
+  call.buffer = buffer;
+  call.buf_len = length;
+  ret =  write(schedfd, &call, sizeof(call));
+  return ret;
+}
+
+int zsv_mtserial_send_finish(int schedfd,  int rid, void *buffer, int length)
+{
+  struct api_call call;
+  int ret;
+
+  call.cmd=SEND_SERIAL_FINISH;
+  call.rid = rid;
+  call.buffer = buffer;
+  call.buf_len = length;
+  ret =  write(schedfd, &call, sizeof(call));
+  return ret;
+}

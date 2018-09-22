@@ -81,6 +81,10 @@ struct reserve {
   int rid;
   unsigned long long first_job_activation_ns;
   unsigned long long job_activation_count;
+  unsigned long long current_job_activation_ticks;
+  unsigned long long current_job_deadline_ticks;
+  int job_completed;
+  unsigned long long current_job_hypertasks_preemption_ticks;
   unsigned long long start_ns;
   unsigned long long stop_ns;
   unsigned long long current_exectime_ns;
@@ -117,6 +121,7 @@ struct reserve {
   struct timespec zsinstant;
   struct timespec hyp_enforcer_instant;
   unsigned long long hyp_enforcer_instant_ns;
+  unsigned long long hyp_enforcer_instant_ticks;
   unsigned long long zsinstant_ns;
   unsigned long long period_ns;
   unsigned long long period_ticks;

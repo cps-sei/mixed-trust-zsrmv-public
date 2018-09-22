@@ -298,6 +298,7 @@ int zsrmcall=-1;
 
 struct task_struct *sched_task;
 struct task_struct *active_task;
+struct task_struct *serial_recv_task;
 
 struct reserve reserve_table[MAX_RESERVES];
 
@@ -1183,6 +1184,26 @@ int send_budget_enforcement_signal(struct task_struct *task, int signo, int rid)
 }
 
 
+unsigned long long calculate_hypertask_preemption_time_ticks(int rid, unsigned long long now_ticks){
+  int i;
+  unsigned long long cumm_hyppreemption_ticks=0L;
+  
+
+  // find first timestamp after rid started
+  for (i=0;i<trace_index;i++)
+    if (trace_table[i].timestamp_ns >= reserve_table[rid].current_job_activation_ticks &&
+	trace_table[i].timestamp_ns < now_ticks &&
+	trace_table[i].rid != rid &&
+	trace_table[i].event_type == DEBUG_LOG_EVTTYPE_HYPTASKEXEC_BEFORE){
+      if (trace_table[i+1].event_type == DEBUG_LOG_EVTTYPE_HYPTASKEXEC_AFTER){
+	cumm_hyppreemption_ticks += (trace_table[i+1].timestamp_ns - trace_table[i].timestamp_ns);
+	i++;
+      }
+    }
+
+  return cumm_hyppreemption_ticks;
+}
+
 /*********************************************************************/
 /*@requires fp1 && fp2 && fp31 && fp32;
   @requires zsrm_lem1 && zsrm2 && zsrm3 && zsrm4 && zsrm7;
@@ -1200,8 +1221,53 @@ int send_budget_enforcement_signal(struct task_struct *task, int signo, int rid)
 void budget_enforcement(int rid, int request_stop)
 {
   struct task_struct *task;
+  int i;
+  unsigned long long hypertask_preemption_time_ticks=0L;
 
   enforcement_start_timestamp_ticks = get_now_ticks();
+  
+  // double check if we were preempted by a hypertask.
+  // If so, adjust the CPU consumption and reprogram the timer
+
+  if(!hypmtscheduler_dumpdebuglog(&debug_log, &debug_log_buffer_index)){
+    printk(KERN_INFO "ZSRMV.budget_enforcement(): dumpdebuglog hypercall API failed\n");
+  } else {
+
+    //printk(KERN_INFO "ZSRMV.budget_enforcement(): dumpdebuglog: total entries=%u\n", debug_log_buffer_index);
+    for (i = 0; i< debug_log_buffer_index; i++){
+      add_trace_record(debug_log[i].hyptask_id, debug_log[i].timestamp, debug_log[i].event_type);
+    }
+
+    // build a preemption intersection after we add the trace
+    hypertask_preemption_time_ticks = calculate_hypertask_preemption_time_ticks(rid, kernel_entry_timestamp_ticks);
+
+    //printk("ZSRM.budget_enforcement(): HYPER-TASK PREEMPTION rid(%d) discounted: %llu ticks : %llu ns\n", rid, hypertask_preemption_time_ticks, ticks2ns1(hypertask_preemption_time_ticks));
+
+    if (reserve_table[rid].current_job_hypertasks_preemption_ticks < hypertask_preemption_time_ticks){
+      reserve_table[rid].current_job_hypertasks_preemption_ticks = hypertask_preemption_time_ticks;
+      // update the current_exectime_ticks
+      // without taking into account hypertasks preemptions
+      //printk("ZSRM.budget_enforcement(rid(%d)): PREVIOUS current_exectime %llu ns \n",rid,ticks2ns1(reserve_table[rid].current_exectime_ticks));
+      reserve_table[rid].current_exectime_ticks += (kernel_entry_timestamp_ticks - reserve_table[rid].start_ticks);
+      reserve_table[rid].start_ticks = kernel_entry_timestamp_ticks;
+      //printk("ZSRM.budget_enforcement(rid(%d)): MODIFIED current_exectime %llu ns \n",rid,ticks2ns1(reserve_table[rid].current_exectime_ticks));
+      if (reserve_table[rid].exectime_ticks -
+	  (reserve_table[rid].current_exectime_ticks -
+	   reserve_table[rid].current_job_hypertasks_preemption_ticks)
+	  ){
+
+	/*****************************************************************************
+	 * Correct the budget enforcement timer as if it has not happened and return *
+	 *****************************************************************************/
+	//printk("ZSRM.budget_enforcement(rid(%d)): RESETTING TIMER\n",rid);
+	start_enforcement_timer(&(reserve_table[rid]));
+	return;
+      } else {
+	//printk("ZSRM.budget_enforcement(rid(%d)): NOT RESETTING TIMER -- proceeding to enforce\n",rid);
+      }
+    }
+  }
+  
 
   add_trace_record(rid, ticks2ns(kernel_entry_timestamp_ticks), TRACE_EVENT_BUDGET_ENFORCEMENT);//ticks2ns(enforcement_start_timestamp_ticks), TRACE_EVENT_BUDGET_ENFORCEMENT);
 #ifdef __ZS_DEBUG__
@@ -1285,7 +1351,16 @@ void start_of_period(int rid)
   // overhead measurement
   arrival_start_timestamp_ticks = get_now_ticks();
   context_switch_start_timestamp_ticks = arrival_start_timestamp_ticks;
+    
+  reserve_table[rid].current_job_activation_ticks = kernel_entry_timestamp_ticks;
+  reserve_table[rid].current_job_hypertasks_preemption_ticks = 0L;
 
+  if (reserve_table[rid].job_completed){
+    reserve_table[rid].current_job_deadline_ticks = kernel_entry_timestamp_ticks +
+      reserve_table[rid].hyp_enforcer_instant_ticks;
+  }
+  reserve_table[rid].job_completed = 0;
+  
   //add_trace_record(rid,ticks2ns(arrival_start_timestamp_ticks),TRACE_EVENT_START_PERIOD);
   
   //-- SC: reset "real execution time"
@@ -1603,6 +1678,10 @@ int attach_reserve(int rid, int pid)
   // record the first activation
   reserve_table[rid].first_job_activation_ns = ktime_to_ns(ktime_get());// ticks2ns(kernel_entry_timestamp_ticks);
   reserve_table[rid].job_activation_count++;
+  reserve_table[rid].current_job_activation_ticks = kernel_entry_timestamp_ticks;
+  reserve_table[rid].current_job_deadline_ticks = kernel_entry_timestamp_ticks +
+    reserve_table[rid].hyp_enforcer_instant_ticks;
+  reserve_table[rid].job_completed=1;
   
   calling_start_from = 2;
   start_stac(rid);
@@ -1759,9 +1838,16 @@ int start_enforcement_timer(struct reserve *rsvp)
   unsigned long long rest_ns;
 
   //if (rsvp->current_exectime_ns < rsvp->exectime_ns){
-  if (rsvp->exectime_ticks > rsvp->current_exectime_ticks){
-    rest_ticks = rsvp->exectime_ticks - rsvp->current_exectime_ticks;
+  if (rsvp->exectime_ticks > (rsvp->current_exectime_ticks - rsvp->current_job_hypertasks_preemption_ticks)){
+    rest_ticks = rsvp->exectime_ticks -
+      (rsvp->current_exectime_ticks - rsvp->current_job_hypertasks_preemption_ticks);
     rest_ns = ticks2ns1(rest_ticks);
+    /* printk("ZSRM.start_enforcement_timer():  rid(%d) C(%llu) c(%llu) h(%llu) expires in %llu ns\n", */
+    /* 	   rsvp->rid, */
+    /* 	   ticks2ns1(rsvp->exectime_ticks), */
+    /* 	   ticks2ns1(rsvp->current_exectime_ticks), */
+    /* 	   ticks2ns1(rsvp->current_job_hypertasks_preemption_ticks), */
+    /* 	   rest_ns); */
     rsvp->enforcement_timer.expiration =  ktime_to_timespec(ns_to_ktime(rest_ns));//ktime_to_timespec(ns_to_ktime(rest_ticks));
     /* rsvp->enforcement_timer.expiration.tv_sec = (rest_ns / 1000000000L); */
     /* rsvp->enforcement_timer.expiration.tv_nsec = (rest_ns % 1000000000L); */
@@ -2115,6 +2201,8 @@ int wait_for_next_period(int rid, int nowait)
 
   //if (nowait)
   //  return 0;
+
+  reserve_table[rid].job_completed=1;
   
   departure_start_timestamp_ticks = get_now_ticks();
 
@@ -2411,6 +2499,8 @@ void init(void)
   for (i=0;i<MAX_RESERVES;i++) {
     reserve_table[i].first_job_activation_ns=0L;
     reserve_table[i].job_activation_count=0L;
+    reserve_table[i].current_job_activation_ticks=0L;
+    reserve_table[i].current_job_hypertasks_preemption_ticks=0L;
     reserve_table[i].enforcement_type = ENF_NONE;
     reserve_table[i].task_namespace=NULL;
     reserve_table[i].pid=-1;
@@ -2460,6 +2550,8 @@ void init_reserve(int rid)
 {
   reserve_table[rid].first_job_activation_ns=0L;
   reserve_table[rid].job_activation_count=0L;
+  reserve_table[rid].current_job_activation_ticks=0L;
+  reserve_table[rid].current_job_hypertasks_preemption_ticks=0L;
   reserve_table[rid].task_namespace=NULL;
   reserve_table[rid].num_wfnp=0;
   reserve_table[rid].non_periodic_wait=0;
@@ -3130,6 +3222,162 @@ int test_reserve(int option)
   return 0;
 }
 
+//////
+// externals
+//////
+extern  void __hvc(u32 uhcall_function, void *uhcall_buffer, u32 uhcall_buffer_len);
+extern void mavlinkserhb_initialize(u32 baudrate);
+extern bool mavlinkserhb_send(u8 *buffer, u32 buf_len);
+extern bool mavlinkserhb_checkrecv(void);
+extern bool mavlinkserhb_recv(u8 *buffer, u32 max_len, u32 *len_read, bool *uartreadbufexhausted);
+extern bool mavlinkserhb_activatehbhyptask(u32 first_period, u32 recurring_period,
+		u32 priority);
+extern bool mavlinkserhb_deactivatehbhyptask(void);
+
+#define SERIAL_RECEIVING_BUFFER_SIZE 256
+
+struct semaphore serial_buffer_sem;
+
+u8 serial_receiving_buffer[SERIAL_RECEIVING_BUFFER_SIZE];
+
+#define SERIAL_CIRCULAR_INC(a) ( (a==SERIAL_RECEIVING_BUFFER_SIZE-1) ? 0 : a+1)
+
+static DECLARE_WAIT_QUEUE_HEAD(serial_read_wait_queue);
+
+// point to next byte to read
+int serial_receiving_reading_index=0;
+
+// point to next byte to write
+int serial_receiving_writing_index=0;
+
+int serial_receiving_buffer_write(u8 *buffer, int len)
+{
+  int wrote=0;
+  int i=0;
+
+  down_interruptible(&serial_buffer_sem);
+  
+  while(SERIAL_CIRCULAR_INC(serial_receiving_writing_index) != serial_receiving_reading_index && i<len){
+    serial_receiving_buffer[serial_receiving_writing_index] = buffer[i];
+    serial_receiving_writing_index = SERIAL_CIRCULAR_INC(serial_receiving_writing_index);
+    i++;
+    wrote++;
+  }
+
+  up(&serial_buffer_sem);
+  
+  return wrote;
+}
+
+int serial_receiving_buffer_read(u8 *buffer, int len)
+{
+  int i=0;
+  int read=0;
+
+  down_interruptible(&serial_buffer_sem);
+  
+  while(serial_receiving_writing_index != serial_receiving_reading_index && i<len){
+    buffer[i] = serial_receiving_buffer[serial_receiving_reading_index];
+    serial_receiving_reading_index = SERIAL_CIRCULAR_INC(serial_receiving_reading_index);
+    i++;
+    read++;
+  }
+
+  up(&serial_buffer_sem);
+  
+  return read;
+}
+
+
+static void serial_receiver_task(void *a)
+{
+  int rid;
+  /* int cnt,ret; */
+  struct sched_param p;
+  struct task_struct *task;
+  u8 buffer[100];
+  u32 len_read;
+  bool readbufferexhausted;
+  int wasempty=0;
+
+  printk("ZSRMV.serial_receiver_task() READY!\n");
+  
+  while (!kthread_should_stop()) {
+    if(mavlinkserhb_checkrecv()){
+      do {
+	if(mavlinkserhb_recv(&buffer, sizeof(buffer), &len_read, &readbufferexhausted)){
+	  wasempty = (serial_receiving_writing_index == serial_receiving_reading_index);
+	  serial_receiving_buffer_write(buffer,len_read);
+	  if (wasempty){
+	    wake_up_interruptible(&serial_read_wait_queue);
+	  }
+	} else {
+	  readbufferexhausted=true;
+	}
+      } while(!readbufferexhausted);
+    }
+    usleep_range(80000,100000);
+  }
+
+  printk("ZSRMV.serial_receiver_task() EXITING\n");
+}
+
+int init_serial(u32 bauds)
+{
+  mavlinkserhb_initialize(bauds);
+  return 0;
+}
+		
+int send(int rid, void *buffer, int buf_len, int finished)
+{
+  int ret;
+
+  if (finished){
+    if (kernel_entry_timestamp_ticks <= reserve_table[rid].current_job_deadline_ticks){
+      ret = mavlinkserhb_send(buffer,buf_len);
+    } else {
+      // return error: too late to send
+      ret = -2; 
+    }
+    wait_for_next_period(rid,0);
+  } else {
+    ret = mavlinkserhb_send(buffer,buf_len);
+  }
+  
+  return ret;
+}
+
+int receive(int rid, u8 *buffer, int buf_len, unsigned long *flags)
+{
+  int ret=0;
+
+  ret = serial_receiving_buffer_read(buffer,buf_len);
+
+  if (ret == 0){
+
+    // free semaphores and re-enable interrupts
+    // enable interrupts
+    spin_unlock_irqrestore(&zsrmlock, *flags);
+
+    // enable other syscalls
+    up(&zsrmsem);
+
+    wait_event_interruptible(serial_read_wait_queue,
+			     (serial_receiving_writing_index != serial_receiving_reading_index ));
+    // re-acquire semaphore and disable interrutps
+
+    if ((ret = down_interruptible(&zsrmsem)) < 0){
+      printk("ZSRMV.receive(): could not re-acquire semaphore after sleep\n");
+    } 
+    
+    // disable interrupts to avoid concurrent interrupts
+    spin_lock_irqsave(&zsrmlock, *flags);
+    
+    ret = serial_receiving_buffer_read(buffer,buf_len);
+  }
+  
+  return ret;
+}
 
 static ssize_t zsrm_read(struct file *filp,	/* see include/linux/fs.h   */
 			   char *buffer,	/* buffer to fill with data */
@@ -3223,6 +3471,22 @@ static ssize_t zsrm_write
     ret = test_reserve(call.rid);
     need_reschedule = 0;
     break;
+  case INIT_SERIAL:
+    ret = init_serial(call.rid);
+    need_reschedule = 0;
+    break;
+  case RECV_SERIAL:
+    ret = receive(call.rid, call.buffer, call.buf_len, &flags);
+    need_reschedule=1;
+    break;
+  case SEND_SERIAL:
+    ret = send(call.rid, call.buffer, call.buf_len, 0); // no finish
+    need_reschedule=0;
+    break;
+  case SEND_SERIAL_FINISH:
+    ret = send(call.rid, call.buffer, call.buf_len,1); // finish
+    need_reschedule = 1;
+    break;
   case END_PERIOD:
     if (!active_rid(call.rid)){
       printk("ZSRMMV.write() ERROR got cmd(%s) with invalid/inactive rid(%d)\n",
@@ -3298,6 +3562,7 @@ static ssize_t zsrm_write
       reserve_table[ret].nominal_exectime_ticks = ns2ticks(reserve_table[ret].nominal_exectime_ns);
       reserve_table[ret].zsinstant_ns = (call.zsinstant_sec * 1000000000L)+call.zsinstant_nsec;
       reserve_table[ret].hyp_enforcer_instant_ns = (call.hyp_enforcer_sec * 1000000000L) + call.hyp_enforcer_nsec;
+      reserve_table[ret].hyp_enforcer_instant_ticks = ns2ticks(reserve_table[ret].hyp_enforcer_instant_ns);
       
       // verify if zero slack instant is the same as period set it to twice its value to ensure that it does not
       // have the possibility of triggering before the end of period (effectively disabling it).
@@ -3466,6 +3731,10 @@ static int __init zsrm_init(void)
   // initialize semaphore
   sema_init(&zsrmsem,1); // binary - initially unlocked
 
+  // serial buffer semaphore
+  // binary -- initially unlocked
+  sema_init(&serial_buffer_sem,1);
+
   init();
   printk(KERN_INFO "ZSRMMV: HELLO!\n");
   
@@ -3541,6 +3810,24 @@ static int __init zsrm_init(void)
   
   kthread_bind(active_task, 0);
 
+  // Start serial receiver task
+  serial_recv_task = kthread_create((void *)serial_receiver_task, NULL, "Serial receiver thread");
+
+  printk("ZSRMV: created serial receiver task ptr=%x\n",serial_recv_task);
+  
+  p.sched_priority = DAEMON_PRIORITY;
+  
+  if (sched_setscheduler(serial_recv_task, SCHED_FIFO, &p)<0){
+    printk("ZSRMMV.init() error setting serial_receiver_task kernel thead priority\n");
+  }
+  
+  kthread_bind(serial_recv_task, 0);
+
+  if (serial_recv_task){
+    wake_up_process(serial_recv_task);
+  }
+
+  
   init_cputsc();
 
   //hypmtscheduler_inittsc();
@@ -3636,6 +3923,8 @@ static void __exit zsrm_exit(void)
   activate_top = -1;
   kthread_stop(active_task);
 
+  kthread_stop(serial_recv_task);
+  
   print_overhead_stats();
 
   end_tick = sysreg_read_cntpct(); //rdtsc64();

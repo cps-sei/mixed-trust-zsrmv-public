@@ -1,0 +1,71 @@
+How to create the single task mixed-trust timeline
+
+1. Setup the connection to the raspberry pi
+   a. Connect USB-Serial cables to the pi cables by connecting:
+      black to black
+      green to blue
+      blue to green
+
+   b. run minicom configured at 115200 N81
+
+2. Boot raspberry pi
+
+3. Setup cpu frequency scaling to userspace:
+   a. Enter superuser shell with: sudo su
+   b. setup userspace frequency scaling with: echo userspace >/sys/devices/system/cpu/cpu0/cpufreq/scaling_governor
+   c. exit superuser shell typing 'exit'
+   d. verify frequency is at 600Mhz by typing cat /sys/devices/system/cpu/cpu0/cpufreq/scaling_cur_freq
+
+
+4. Log into the raspberry pi with the pi user
+
+5. cd to /home/pi/mixed-trust
+
+6. Load zsrmv.ko: sudo insmod zsrmv.ko
+
+7. Give access to /dev/zsrmv0 to all: chmod 0666 /dev/zsrmv0
+
+8. cd to test
+
+9. delete dump.csv: rm dump.csv
+
+10. run onetaskenforcementtest-no-handler-600mhz
+
+11. collect the trace timestamps from zsrmv running : ./dumptrace
+
+12. From the development laptop copy from the screen the output into a text file in the development laptop ./mixed-trust-zsrmv/test/hypdump.txt
+
+13. Edit hypdump.txt to remove the wraparound that happens in the second line after the message [HYPMTSCHED:*]. e.g.
+
+    [HYPMTSCHED:TSTAMP]:CREATEHYPTASK:0x00000000 
+    :0x00000001 
+    085DA492 
+
+    should be:
+
+    [HYPMTSCHED:TSTAMP]:CREATEHYPTASK:0x00000000 
+    :0x00000001085DA492 
+
+
+14. transform the txt file to a csv file with:
+    hyptex2csv.sh <input-filename> > <output-filename>
+    e.g. hyptex2csv.sh hypdump.txt > hypdump.csv
+
+15. Shutdown the raspberry pi
+
+16. Plugin the pi sdcard into the laptop and copy the dump file to the test directory:
+    cp /media/<user>/*/home/pi/mixed-trust/test/dump.csv dump.csv
+
+17. merge the two dump files:
+    cp dump.csv merged.csv
+    cat hypdump.csv >> merged.csv
+
+18. order the timestamps
+    ./sortdump.sh merged.csv ordered.csv
+
+19 generate plot in micro-seconds:
+   ./gensvg-us.sh ordered.csv plot.svg 0
+   where 0 is the first reservation number to start with
+
+20. open the plot with a browser:
+    chrome plot.svg

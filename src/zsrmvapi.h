@@ -24,6 +24,10 @@
 #define END_PERIOD 10
 #define WAIT_RELEASE 11
 #define TEST_RESERVE 12
+#define SEND_SERIAL 13
+#define SEND_SERIAL_FINISH 14
+#define INIT_SERIAL 15
+#define RECV_SERIAL 16
 
 #define STRING_ZSV_CALL(c) ( c == WAIT_PERIOD ? "wait_period" : \
 			     c == CREATE_RSV  ? "create_rsv"  : \
@@ -114,6 +118,8 @@ struct api_call {
   int priority;
   int criticality;
   unsigned long long *pwcet;
+  void *buffer;
+  int buf_len;
 };
 
 struct reserve_spec_t {
@@ -156,6 +162,10 @@ int del_thraded_signal_handler_record(struct threaded_signal_handler_table_t *re
 int zsv_wait_release(int schedfd, int rid);
 int zsv_end_period(int schedfd, int rid);
 int zsv_test_reserve(int schedfd, int option);
+int zsv_mtserial_send(int schedfd, int rid, void *buffer, int length);
+int zsv_mtserial_send_finish(int schedfd, int rid, void *buffer, int length);
+int zsv_mtserial_recv(int schedfd, int rid, void *buffer, int length);
+int zsv_mtserial_init(int schedfd, int bauds);
 #ifndef __KERNEL__
 int zsv_write_trace(int schedfd, FILE *fid);
 #endif

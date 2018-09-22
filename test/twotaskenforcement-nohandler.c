@@ -116,16 +116,16 @@ int main(int argc, char *argv[])
   }
 
   if ((rid = zsv_create_reserve(schedfd,
-				2, // period_secs
-				0, // period_nsecs
-				2, // zsinstant_sec -- same as period = disabled
-				0, // zsinstant_nsec -- same as period = disabled
-				1, // hypertask enforcement sec
-				0, // hypertask enforcement nsec
+				0, // period_secs
+				100000000, // period_nsecs
+				0, // zsinstant_sec -- same as period = disabled
+				100000000, // zsinstant_nsec -- same as period = disabled
+				0, // hypertask enforcement sec
+				80000000, // hypertask enforcement nsec
 				0, // exectime _secs
-				300000000, // exectime_nsecs
+				20000000, // exectime_nsecs
 				0, // nominal_exectime_sec -- same as overloaded
-				300000000, // nominal_exectime_nsec -- same as overloaded
+				20000000, // nominal_exectime_nsec -- same as overloaded
 				10, // priority
 				1  // criticality
 				) 
@@ -135,16 +135,16 @@ int main(int argc, char *argv[])
   }
 
   if ((rid2 = zsv_create_reserve(schedfd,
-				1, // period_secs
-				0, // period_nsecs
-				1, // zsinstant_sec -- same as period = disabled
-				0, // zsinstant_nsec -- same as period = disabled
+				0, // period_secs
+				170000000, // period_nsecs
+				0, // zsinstant_sec -- same as period = disabled
+				170000000, // zsinstant_nsec -- same as period = disabled
 				0, // hypertask enforcement sec
-				500000000, // hypertask enforcement nsec
+				150000000, // hypertask enforcement nsec
 				0, // exectime _secs
-				150000000, // exectime_nsecs
+				40000000, // exectime_nsecs
 				0, // nominal_exectime_sec -- same as overloaded
-				150000000, // nominal_exectime_nsec -- same as overloaded
+				40000000, // nominal_exectime_nsec -- same as overloaded
 				10, // priority
 				1  // criticality
 				) 
@@ -189,12 +189,12 @@ int main(int argc, char *argv[])
     printf("task1 attached and ready\n");
 
     for (i=0;i<10;i++){
-      if (i == 5){
-	busy_timestamped(700, timestamp1, TS_BUFFER_SIZE, &tsindex1);
-      } else if (i == 7) {
-	busy_timestamped(3000, timestamp1, TS_BUFFER_SIZE, &tsindex1);
+      if (i == 0){
+	busy_timestamped(15, timestamp1, TS_BUFFER_SIZE, &tsindex1);	
+      } else if (i == 1){
+	busy_timestamped(100, timestamp1, TS_BUFFER_SIZE, &tsindex1);
       } else {
-	busy_timestamped(150, timestamp1, TS_BUFFER_SIZE, &tsindex1);
+	busy_timestamped(15, timestamp1, TS_BUFFER_SIZE, &tsindex1);
       }
       if (enforced){
 	printf("USER: enforced -- should not complete?\n");
@@ -239,12 +239,12 @@ int main(int argc, char *argv[])
     printf("task1 attached and ready\n");
 
     for (i=0;i<10;i++){
-      if (i == 5){
-	busy_timestamped(100, timestamp1, TS_BUFFER_SIZE, &tsindex1);
-      } else if (i == 7) {
-	busy_timestamped(500, timestamp1, TS_BUFFER_SIZE, &tsindex1);
+      if (i == 0){
+	busy_timestamped(20, timestamp1, TS_BUFFER_SIZE, &tsindex1);
+      } else if (i == 1) {
+	busy_timestamped(50, timestamp1, TS_BUFFER_SIZE, &tsindex1);
       } else {
-	busy_timestamped(200, timestamp1, TS_BUFFER_SIZE, &tsindex1);
+	busy_timestamped(20, timestamp1, TS_BUFFER_SIZE, &tsindex1);
       }
       if (enforced){
 	printf("USER: enforced -- should not complete?\n");

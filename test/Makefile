@@ -38,7 +38,7 @@
 #
 #DM-0000891
 ifeq ($(ARCH),arm)
-	CROSS_COMPILE=~/data/tools/pi-tools.git/arm-bcm2708/gcc-linaro-arm-linux-gnueabihf-raspbian-x64/bin/arm-linux-gnueabihf-
+	CROSS_COMPILE=/home/dionisio/git/raspberrypi/tools/arm-bcm2708/gcc-linaro-arm-linux-gnueabihf-raspbian-x64/bin/arm-linux-gnueabihf-
 	CC=$(CROSS_COMPILE)gcc
 	AR=$(CROSS_COMPILE)ar
 	LD=$(CROSS_COMPILE)ld
