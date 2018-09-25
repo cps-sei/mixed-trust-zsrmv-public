@@ -334,7 +334,7 @@ void start_stac(int rid);
 void start(int rid);
 void stop_stac(int rid);
 void stop(int rid);
-int wait_for_next_period(int rid, int nowait);
+int wait_for_next_period(int rid, int nowait, int disableHypertask);
 int calculate_rm_priorities(void);
 int set_rm_priorities(void);
 struct task_struct *gettask(int pid, struct pid_namespace *ns);
@@ -2194,7 +2194,7 @@ void stop(int rid)
   @ensures fp31 && fp32 && zsrm_lem1 && zsrm1 && zsrm2 && zsrm3 && zsrm4 && zsrm7;
 */
 /*********************************************************************/
-int wait_for_next_period(int rid, int nowait)
+int wait_for_next_period(int rid, int nowait, int disableHypertask)
 {
   struct task_struct *task;
   int rsv_visited = 0;
@@ -2208,7 +2208,7 @@ int wait_for_next_period(int rid, int nowait)
 
   add_trace_record(rid, ticks2ns(kernel_entry_timestamp_ticks), TRACE_EVENT_WFNP);//ticks2ns(departure_start_timestamp_ticks), TRACE_EVENT_WFNP);
 
-  if (reserve_table[rid].hypertask_active){
+  if (reserve_table[rid].hypertask_active && disableHypertask){
     // cancel hyper_task
     if(!hypmtscheduler_disablehyptask(reserve_table[rid].hyptask_handle)){
       printk("ZSRMV.wait_next_period(): error calling the hypertask disable\n");
@@ -2437,7 +2437,7 @@ int wait_for_next_release(int rid)
     // This means that the enforcer was called and it called wait_for_release() which completed the end_of_period()+wait_for_release() pair.
     // Hence, we now need to call for a full wait_for_next_period() instead.
     
-    wait_for_next_period(rid,0);
+    wait_for_next_period(rid,0, 1);
   }
   
   return 0;
@@ -3335,11 +3335,18 @@ int send(int rid, void *buffer, int buf_len, int finished)
   if (finished){
     if (kernel_entry_timestamp_ticks <= reserve_table[rid].current_job_deadline_ticks){
       ret = mavlinkserhb_send(buffer,buf_len);
+      wait_for_next_period(rid,
+			   0,
+			   1 // disableHypertask -- normal actuation sent on time
+			   );
     } else {
       // return error: too late to send
       ret = -2; 
+      wait_for_next_period(rid,
+			   0,
+			   0 // do not disable hypertask -- if normal actuation was not sent then allow hypertask to send default safe actuation
+			   );
     }
-    wait_for_next_period(rid,0);
   } else {
     ret = mavlinkserhb_send(buffer,buf_len);
   }
@@ -3362,6 +3369,11 @@ int receive(int rid, u8 *buffer, int buf_len, unsigned long *flags)
     // enable other syscalls
     up(&zsrmsem);
 
+
+    /**
+     *  TODO: For multithreaded use this wait needs to be in a loop until the read from the buffer returns non-zero
+     *        We defer this modification until after the demos
+     */ 
     wait_event_interruptible(serial_read_wait_queue,
 			     (serial_receiving_writing_index != serial_receiving_reading_index ));
     // re-acquire semaphore and disable interrutps
@@ -3520,7 +3532,7 @@ static ssize_t zsrm_write
       ret = -1;
     } else {
       //printk("ZSRMMV.write() calling wait_for_next_period(rid(%d))\n",call.rid);
-      wait_for_next_period(call.rid,0);
+      wait_for_next_period(call.rid,0,1);
       //printk("ZSRMMV.write() returned from wait_for_next_period(rid(%d))\n",call.rid);
       ret = 0;
       need_reschedule = 1;
@@ -3532,7 +3544,7 @@ static ssize_t zsrm_write
 	     STRING_ZSV_CALL(call.cmd),call.rid);
       ret = -1;
     } else {
-      wait_for_next_period(call.rid,1);
+      wait_for_next_period(call.rid,1,1);
       ret = 0;
       need_reschedule = 1;
     }

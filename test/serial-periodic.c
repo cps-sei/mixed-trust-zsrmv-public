@@ -103,7 +103,7 @@ int main(int argc, char *argv[])
   }
  
   
-  for (i=0;i<5;i++){
+  for (i=0;i<10;i++){
     if (i==3){
       usleep(1500000);
     }
