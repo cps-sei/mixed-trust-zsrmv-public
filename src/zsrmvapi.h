@@ -28,6 +28,7 @@
 #define SEND_SERIAL_FINISH 14
 #define INIT_SERIAL 15
 #define RECV_SERIAL 16
+#define SIM_CRASH 17
 
 #define STRING_ZSV_CALL(c) ( c == WAIT_PERIOD ? "wait_period" : \
 			     c == CREATE_RSV  ? "create_rsv"  : \
@@ -166,6 +167,7 @@ int zsv_mtserial_send(int schedfd, int rid, void *buffer, int length);
 int zsv_mtserial_send_finish(int schedfd, int rid, void *buffer, int length);
 int zsv_mtserial_recv(int schedfd, int rid, void *buffer, int length);
 int zsv_mtserial_init(int schedfd, int bauds);
+int zsv_simulate_crash(int schedfid);
 #ifndef __KERNEL__
 int zsv_write_trace(int schedfd, FILE *fid);
 #endif

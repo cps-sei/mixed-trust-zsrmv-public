@@ -665,3 +665,13 @@ int zsv_mtserial_send_finish(int schedfd,  int rid, void *buffer, int length)
   ret =  write(schedfd, &call, sizeof(call));
   return ret;
 }
+
+int zsv_simulate_crash(int schedfd)
+{
+  struct api_call call;
+  int ret;
+
+  call.cmd=SIM_CRASH;
+  ret =  write(schedfd, &call, sizeof(call));
+  return ret;
+}

@@ -53,32 +53,41 @@ DM-0000891
 #include <asm/div64.h>
 
 #include "hypmtscheduler.h"
+
 //externals
 extern  void __hvc(u32 uhcall_function, void *uhcall_buffer, u32 uhcall_buffer_len);
 extern bool hypmtscheduler_createhyptask(u32 first_period, u32 regular_period,
 			u32 priority, u32 hyptask_id, u32 *hyptask_handle);
 extern bool hypmtscheduler_disablehyptask(u32 hyptask_handle);
 extern bool hypmtscheduler_deletehyptask(u32 hyptask_handle);
-
 extern u64 sysreg_read_cntpct(void);
-
 extern bool hypmtscheduler_getrawtick64(u64 *tickcount);
-
 extern u64 hypmtscheduler_readtsc64(void);
-
 extern bool hypmtscheduler_inittsc(void);
-
 extern bool hypmtscheduler_logtsc(u32 event);
-
 extern bool hypmtscheduler_dumpdebuglog(u8 *dst_log_buffer, u32 *num_entries);
+
+
+//////
+// externals
+//////
+extern  void __hvc(u32 uhcall_function, void *uhcall_buffer, u32 uhcall_buffer_len);
+extern void mavlinkserhb_initialize(u32 baudrate);
+extern bool mavlinkserhb_send(u8 *buffer, u32 buf_len);
+extern bool mavlinkserhb_checkrecv(void);
+extern bool mavlinkserhb_recv(u8 *buffer, u32 max_len, u32 *len_read, bool *uartreadbufexhausted);
+extern bool mavlinkserhb_activatehbhyptask(u32 first_period, u32 recurring_period,
+		u32 priority);
+extern bool mavlinkserhb_deactivatehbhyptask(void);
 
 
 hypmtscheduler_logentry_t debug_log[DEBUG_LOG_SIZE];
 u32 debug_log_buffer_index = 0;
 
 #include "zsrmv.h"
-
 #include "zsrmvapi.h"
+
+//#define ZSV_SIMULATE_CRASH 1
 
 /*********************************************************************/
 //-- variables to model time
@@ -687,6 +696,10 @@ void __xchg_wrong_size(void);
 
 int add_trace_record(int rid, unsigned long long ts, int event_type)
 {
+#ifdef ZSV_SIMULATE_CRASH
+  char buf[100];
+#endif
+  
 /* #ifdef __ZS_USE_SYSTSC__ */
 /*   if (trace_index >= TRACE_BUFFER_SIZE) */
 /*     return -1; */
@@ -709,6 +722,15 @@ int add_trace_record(int rid, unsigned long long ts, int event_type)
   trace_table[trace_index].event_type = event_type;
   trace_table[trace_index].rid = rid;
   trace_index++;
+
+#ifdef ZSV_SIMULATE_CRASH
+  // Do not print the hypervisor trace events -- they will be printed from the hypervisor
+  if (event_type < 50){
+    sprintf(buf,"%d 0x%llx 0x%x\n",rid,ts,event_type);
+    mavlinkserhb_send(buf,strlen(buf));
+  }
+#endif
+  
   return 0;
 /* #endif */
 }
@@ -3222,17 +3244,6 @@ int test_reserve(int option)
   return 0;
 }
 
-//////
-// externals
-//////
-extern  void __hvc(u32 uhcall_function, void *uhcall_buffer, u32 uhcall_buffer_len);
-extern void mavlinkserhb_initialize(u32 baudrate);
-extern bool mavlinkserhb_send(u8 *buffer, u32 buf_len);
-extern bool mavlinkserhb_checkrecv(void);
-extern bool mavlinkserhb_recv(u8 *buffer, u32 max_len, u32 *len_read, bool *uartreadbufexhausted);
-extern bool mavlinkserhb_activatehbhyptask(u32 first_period, u32 recurring_period,
-		u32 priority);
-extern bool mavlinkserhb_deactivatehbhyptask(void);
 
 #define SERIAL_RECEIVING_BUFFER_SIZE 256
 
@@ -3249,19 +3260,27 @@ int serial_receiving_reading_index=0;
 
 // point to next byte to write
 int serial_receiving_writing_index=0;
+int waiting_for_input=0;
 
 int serial_receiving_buffer_write(u8 *buffer, int len)
 {
   int wrote=0;
   int i=0;
+  int wasempty=0;
 
   down_interruptible(&serial_buffer_sem);
-  
+
+  wasempty = (serial_receiving_writing_index == serial_receiving_reading_index);
+
   while(SERIAL_CIRCULAR_INC(serial_receiving_writing_index) != serial_receiving_reading_index && i<len){
     serial_receiving_buffer[serial_receiving_writing_index] = buffer[i];
     serial_receiving_writing_index = SERIAL_CIRCULAR_INC(serial_receiving_writing_index);
     i++;
     wrote++;
+  }
+
+  if (wasempty){
+    wake_up_interruptible(&serial_read_wait_queue);
   }
 
   up(&serial_buffer_sem);
@@ -3275,6 +3294,13 @@ int serial_receiving_buffer_read(u8 *buffer, int len)
   int read=0;
 
   down_interruptible(&serial_buffer_sem);
+
+  if (serial_receiving_writing_index == serial_receiving_reading_index){
+    up(&serial_buffer_sem);
+    wait_event_interruptible(serial_read_wait_queue, 
+    			     (serial_receiving_writing_index != serial_receiving_reading_index ));
+    down_interruptible(&serial_buffer_sem);
+  }
   
   while(serial_receiving_writing_index != serial_receiving_reading_index && i<len){
     buffer[i] = serial_receiving_buffer[serial_receiving_reading_index];
@@ -3297,26 +3323,33 @@ static void serial_receiver_task(void *a)
   struct task_struct *task;
   u8 buffer[100];
   u32 len_read;
-  bool readbufferexhausted;
+  bool readbufferexhausted=false;
   int wasempty=0;
 
   printk("ZSRMV.serial_receiver_task() READY!\n");
   
   while (!kthread_should_stop()) {
-    if(mavlinkserhb_checkrecv()){
-      do {
+    len_read=0;
+    //while(mavlinkserhb_checkrecv()){
+    //do {
 	if(mavlinkserhb_recv(&buffer, sizeof(buffer), &len_read, &readbufferexhausted)){
-	  wasempty = (serial_receiving_writing_index == serial_receiving_reading_index);
-	  serial_receiving_buffer_write(buffer,len_read);
-	  if (wasempty){
-	    wake_up_interruptible(&serial_read_wait_queue);
+	  //wasempty = (serial_receiving_writing_index == serial_receiving_reading_index);
+	  if (len_read >0){
+	    serial_receiving_buffer_write(buffer,len_read);
+	    //printk("ZSRM.serial_receiver_task(): finished reading %d bytes\n",len_read);
 	  }
+	  //if (wasempty){
+	  //  wake_up_interruptible(&serial_read_wait_queue);
+	  //}
 	} else {
-	  readbufferexhausted=true;
+	  //readbufferexhausted=true;
+	  printk("ZSRM.serial_receiver_task(): ERROR in mavlinkserhb_recv()\n");
 	}
-      } while(!readbufferexhausted);
-    }
-    usleep_range(80000,100000);
+	//} while(!readbufferexhausted);
+	//readbufferexhausted=false;
+      //}
+    //printk("ZSRM.serial_receiver_task(): finished reading %d bytes\n",len_read);
+    usleep_range(590,600);
   }
 
   printk("ZSRMV.serial_receiver_task() EXITING\n");
@@ -3358,9 +3391,9 @@ int receive(int rid, u8 *buffer, int buf_len, unsigned long *flags)
 {
   int ret=0;
 
-  ret = serial_receiving_buffer_read(buffer,buf_len);
+  /* ret = serial_receiving_buffer_read(buffer,buf_len); */
 
-  if (ret == 0){
+  /* if (ret == 0){ */
 
     // free semaphores and re-enable interrupts
     // enable interrupts
@@ -3374,22 +3407,38 @@ int receive(int rid, u8 *buffer, int buf_len, unsigned long *flags)
      *  TODO: For multithreaded use this wait needs to be in a loop until the read from the buffer returns non-zero
      *        We defer this modification until after the demos
      */ 
-    wait_event_interruptible(serial_read_wait_queue,
-			     (serial_receiving_writing_index != serial_receiving_reading_index ));
+    /* wait_event_interruptible(serial_read_wait_queue, */
+    /* 			     (serial_receiving_writing_index != serial_receiving_reading_index )); */
     // re-acquire semaphore and disable interrutps
 
-    if ((ret = down_interruptible(&zsrmsem)) < 0){
+    ret = serial_receiving_buffer_read(buffer,buf_len);
+
+    if (down_interruptible(&zsrmsem) < 0){
       printk("ZSRMV.receive(): could not re-acquire semaphore after sleep\n");
     } 
     
     // disable interrupts to avoid concurrent interrupts
     spin_lock_irqsave(&zsrmlock, *flags);
     
-    ret = serial_receiving_buffer_read(buffer,buf_len);
-  }
+    /* ret = serial_receiving_buffer_read(buffer,buf_len); */
+  /* } */
   
   return ret;
 }
+
+/**
+ * This is to simulate a kernel (and VM) error just to test the resilience of the hypervisor
+ */
+
+static void simulate_crash(void)
+{
+  char *argv[] = {"/bin/sync", NULL};
+  char *envp[] = {"HOME=/", "TERM=linux", "PATH=/sbin:/bin:/usr/sbin:/usr/bin", NULL};
+  call_usermodehelper(argv[0],argv,envp, UMH_WAIT_PROC);  
+  panic("Simulated Crash");
+  printk("ZSRM.simulate_crash() FAILED. call to panic() returned\n");
+}
+
 
 static ssize_t zsrm_read(struct file *filp,	/* see include/linux/fs.h   */
 			   char *buffer,	/* buffer to fill with data */
@@ -3479,6 +3528,14 @@ static ssize_t zsrm_write
   zsrmcall = call.cmd;
   
   switch (call.cmd) {
+  case SIM_CRASH:
+#ifdef ZSV_SIMULATE_CRASH
+    simulate_crash();
+    ret = 0;
+#else
+    ret = -1;
+#endif
+    break;
   case TEST_RESERVE:
     ret = test_reserve(call.rid);
     need_reschedule = 0;
@@ -3827,11 +3884,11 @@ static int __init zsrm_init(void)
 
   printk("ZSRMV: created serial receiver task ptr=%x\n",serial_recv_task);
   
-  p.sched_priority = DAEMON_PRIORITY;
+  /* p.sched_priority = DAEMON_PRIORITY; */
   
-  if (sched_setscheduler(serial_recv_task, SCHED_FIFO, &p)<0){
-    printk("ZSRMMV.init() error setting serial_receiver_task kernel thead priority\n");
-  }
+  /* if (sched_setscheduler(serial_recv_task, SCHED_FIFO, &p)<0){ */
+  /*   printk("ZSRMMV.init() error setting serial_receiver_task kernel thead priority\n"); */
+  /* } */
   
   kthread_bind(serial_recv_task, 0);
 
