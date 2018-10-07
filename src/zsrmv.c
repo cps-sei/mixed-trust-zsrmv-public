@@ -3245,7 +3245,7 @@ int test_reserve(int option)
 }
 
 
-#define SERIAL_RECEIVING_BUFFER_SIZE 256
+#define SERIAL_RECEIVING_BUFFER_SIZE 2048
 
 struct semaphore serial_buffer_sem;
 
@@ -3343,21 +3343,40 @@ static void serial_receiver_task(void *a)
 	  //}
 	} else {
 	  //readbufferexhausted=true;
-	  printk("ZSRM.serial_receiver_task(): ERROR in mavlinkserhb_recv()\n");
+	  //printk("ZSRM.serial_receiver_task(): ERROR in mavlinkserhb_recv()\n");
 	}
 	//} while(!readbufferexhausted);
 	//readbufferexhausted=false;
       //}
     //printk("ZSRM.serial_receiver_task(): finished reading %d bytes\n",len_read);
-    usleep_range(590,600);
+    usleep_range(140,150);
   }
 
   printk("ZSRMV.serial_receiver_task() EXITING\n");
 }
 
+
+uint32_t hyp_serial_recv_task_handle=-1;
+int serial_recv_task_running=0;
+
 int init_serial(u32 bauds)
 {
   mavlinkserhb_initialize(bauds);
+  
+  if (!mavlinkserhb_activatehbhyptask(300 * HYPMTSCHEDULER_TIME_1USEC, 300 * HYPMTSCHEDULER_TIME_1USEC, 10)){
+    printk("ZSRM.init_serial(): error starting serial hyptask\n");
+  }
+  /* if(!hypmtscheduler_createhyptask(300 * HYPMTSCHEDULER_TIME_1USEC, // FIRST TIMER */
+  /* 				   300 * HYPMTSCHEDULER_TIME_1USEC, // FOLLOW UP TIMERS */
+  /* 				   10, // PRIORITY */
+  /* 				   3,  // hypertask id */
+  /* 				   &hyp_serial_recv_task_handle // saving the handle */
+  /* 				   )){ */
+  /*   printk("ZSRM.init_serial(): error creating serial receiving hypertask\n"); */
+  /* } else { */
+  /*   serial_recv_task_running = 1; */
+  /* } */
+
   return 0;
 }
 		
@@ -3410,6 +3429,7 @@ int receive(int rid, u8 *buffer, int buf_len, unsigned long *flags)
     /* wait_event_interruptible(serial_read_wait_queue, */
     /* 			     (serial_receiving_writing_index != serial_receiving_reading_index )); */
     // re-acquire semaphore and disable interrutps
+
 
     ret = serial_receiving_buffer_read(buffer,buf_len);
 
@@ -3880,9 +3900,9 @@ static int __init zsrm_init(void)
   kthread_bind(active_task, 0);
 
   // Start serial receiver task
-  serial_recv_task = kthread_create((void *)serial_receiver_task, NULL, "Serial receiver thread");
+  /* serial_recv_task = kthread_create((void *)serial_receiver_task, NULL, "Serial receiver thread"); */
 
-  printk("ZSRMV: created serial receiver task ptr=%x\n",serial_recv_task);
+  /* printk("ZSRMV: created serial receiver task ptr=%x\n",serial_recv_task); */
   
   /* p.sched_priority = DAEMON_PRIORITY; */
   
@@ -3890,11 +3910,11 @@ static int __init zsrm_init(void)
   /*   printk("ZSRMMV.init() error setting serial_receiver_task kernel thead priority\n"); */
   /* } */
   
-  kthread_bind(serial_recv_task, 0);
+  /* kthread_bind(serial_recv_task, 0); */
 
-  if (serial_recv_task){
-    wake_up_process(serial_recv_task);
-  }
+  /* if (serial_recv_task){ */
+  /*   wake_up_process(serial_recv_task); */
+  /* } */
 
   
   init_cputsc();
@@ -3992,7 +4012,14 @@ static void __exit zsrm_exit(void)
   activate_top = -1;
   kthread_stop(active_task);
 
-  kthread_stop(serial_recv_task);
+  /* kthread_stop(serial_recv_task); */
+
+  /* if (serial_recv_task_running){ */
+  /*   serial_recv_task_running = 0; */
+  /*   if(!hypmtscheduler_deletehyptask(hyp_serial_recv_task_handle)){ */
+  /*     printk("ZSRM.exit(): error deleting serial receiver hyper task\n"); */
+  /*   } */
+  /* } */
   
   print_overhead_stats();
 

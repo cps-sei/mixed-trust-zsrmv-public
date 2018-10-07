@@ -74,7 +74,7 @@ int main(int argc, char *argv[])
     return -1;
   }
 
-  zsv_mtserial_init(schedfd,921600);//115200);
+  zsv_mtserial_init(schedfd,115200);
 
   do {
     if (len = zsv_mtserial_recv(schedfd, 0, buffer,20)){
