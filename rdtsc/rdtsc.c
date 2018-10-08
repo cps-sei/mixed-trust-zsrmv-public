@@ -27,31 +27,52 @@ inline unsigned long rd_tsc(void){
 	return result;
 }
 
+u64 rdtsc64(void){
+	u32 tsc_lo, tsc_hi;
+	u64 l_tickcount;
+
+	asm volatile
+		(	" isb\r\n"
+			" mrrc p15, 0, r0, r1, c9 \r\n"
+			" mov %0, r0 \r\n"
+			" mov %1, r1 \r\n"
+				: "=r" (tsc_lo), "=r" (tsc_hi) // outputs
+				: // inputs
+	           : "r0", "r1" //clobber
+	    );
+
+	l_tickcount = tsc_hi;
+	l_tickcount = l_tickcount << 32;
+	l_tickcount |= tsc_lo;
+
+	return l_tickcount;
+}
+
 
 static int __init rdtsc_init(void)
 {
-  unsigned long tmp;
-  unsigned long tmp1;
+  u64 tmp;
+  u64 tmp1;
   printk("rdtsc STARTED\n");
   start_tsc();
-  tmp = rd_tsc();
-  printk("tsc 1: %lu\n",tmp);
-  tmp = rd_tsc();
-  printk("tsc 2: %lu\n",tmp);
-  tmp = rd_tsc();
-  printk("tsc 3: %lu\n",tmp);
-  tmp = rd_tsc();
-  printk("tsc 4: %lu\n",tmp);
-  tmp = rd_tsc();
-  printk("tsc 5: %lu\n",tmp);
-  tmp = rd_tsc();
-  printk("tsc 6: %lu\n",tmp);
-  tmp = rd_tsc();
-  printk("tsc 7: %lu\n",tmp);
-  tmp = rd_tsc();
-  tmp1 = rd_tsc();
-  printk("tsc 8: %lu\n",tmp);
-  printk("tsc 8': %lu\n",tmp1);
+  tmp = rdtsc64();
+  printk("tsc 1: %llu\n",tmp);
+  tmp = rdtsc64();
+  printk("tsc 2: %llu\n",tmp);
+  tmp = rdtsc64();
+  printk("tsc 3: %llu\n",tmp);
+  tmp = rdtsc64();
+  printk("tsc 4: %llu\n",tmp);
+  tmp = rdtsc64();
+  printk("tsc 5: %llu\n",tmp);
+  tmp = rdtsc64();
+  printk("tsc 6: %llu\n",tmp);
+  tmp = rdtsc64();
+  printk("tsc 7: %llu\n",tmp);
+  tmp = rdtsc64();
+  tmp1 = rdtsc64();
+  printk("tsc 8: %llu\n",tmp);
+  printk("tsc 8+': %llu\n",tmp1);
   return 0;
 }
 
