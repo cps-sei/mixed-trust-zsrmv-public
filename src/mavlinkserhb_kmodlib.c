@@ -44,9 +44,8 @@
 
 #include "mavlinkserhb.h"
 
-// Implemented in hypmtscheduler_kmodlib.c
+// using the one defined in the hypmtscheduler library
 extern void __hvc(u32 uhcall_function, void *uhcall_buffer, u32 uhcall_buffer_len);
-
 
 /* void __hvc(u32 uhcall_function, void *uhcall_buffer, */
 /* 		u32 uhcall_buffer_len){ */

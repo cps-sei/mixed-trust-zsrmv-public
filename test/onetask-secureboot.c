@@ -61,33 +61,98 @@ DM-0000891
 
 #include <zsrmvapi.h>
 
-int main(int argc, char *argv[])
+#define TS_BUFFER_SIZE 100000
+
+unsigned long long timestamp1[TS_BUFFER_SIZE];
+long tsindex1=0;
+
+
+#define TRACE_BUF_SIZE 1000
+
+struct trace_rec_t trace[TRACE_BUF_SIZE];
+
+  int main(int argc, char *argv[])
 {
-  int schedfd;
-  int line=0;
-
-  char buffer[20];
-  int len=20;
+  int rid, rid2,r,cnt;
   int i;
-
+  unsigned long long wcet;
+  long l;
+  int schedfd;
+  int enffd;
+  
   if ((schedfd = zsv_open_scheduler())<0){
     printf("Error opening the scheduler");
     return -1;
   }
 
-  zsv_mtserial_init(schedfd,115200);
+  if ((rid = zsv_create_reserve(schedfd,
+				1, // period_secs
+				0, // period_nsecs
+				1, // zsinstant_sec -- same as period = disabled
+				0, // zsinstant_nsec -- same as period = disabled
+				0, // hypertask enforcement sec
+				500000000, // hypertask enforcement nsec
+				0, // exectime _secs
+				500000000, // exectime_nsecs
+				0, // nominal_exectime_sec -- same as overloaded
+				500000000, // nominal_exectime_nsec -- same as overloaded
+				10, // priority
+				1  // criticality
+				) 
+       )<0){
+    printf("error calling create reserve\n");
+    return -1;
+  }
 
-  do {
-    if (len = zsv_mtserial_recv(schedfd, 0, buffer,20)){
-      for(i=0;i<len;i++){
-	printf("%d: %d\n",line++,buffer[i]);
-      }
+  printf("about to call attach reserve for pid(%d) rid(%d)\n",getpid(), rid);
+  if (zsv_attach_reserve(schedfd, getpid(), rid)<0){
+    printf("error calling attach reserve\n");
+    return -1;
+  }
+
+  printf("task1 attached and ready\n");
+
+  for (i=0;i<10;i++){
+    if (i == 0){
+      busy_timestamped(150, timestamp1, TS_BUFFER_SIZE, &tsindex1);	
+    } else if (i == 1){
+      busy_timestamped(1000, timestamp1, TS_BUFFER_SIZE, &tsindex1);
     } else {
-      printf("could not read anything\n");
+      busy_timestamped(150, timestamp1, TS_BUFFER_SIZE, &tsindex1);
     }
-  } while (1);
+    printf("wfnp rid(%d)\n",rid);
+    zsv_wait_period(schedfd,rid);
+  }
 
+  zsv_delete_reserve(schedfd,rid);
+
+    
+  // dump trace
+    
+  r = read(schedfd,trace,TRACE_BUF_SIZE*sizeof(struct trace_rec_t));
+    
+  if (r<0){
+    printf("error\n");
+  } else {
+    FILE *ofid = fopen("dump.csv","w+");
+    if (ofid == NULL){
+      printf("Error opening output file\n");
+      return -1;
+    }
+    cnt = r / sizeof(struct trace_rec_t);
+    for (i=0;i<cnt;i++){
+      fprintf(ofid, "%d %lld %d\n",
+	      trace[i].rid,
+	      trace[i].timestamp_ns,
+	      trace[i].event_type);
+    }
+    fclose(ofid);
+  }
+
+  
   zsv_close_scheduler(schedfd);
 
-  printf("Done\n");
+  printf("DONE\n");
+
+  return 0;
 }

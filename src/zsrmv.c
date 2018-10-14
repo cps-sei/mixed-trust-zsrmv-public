@@ -89,6 +89,10 @@ u32 debug_log_buffer_index = 0;
 
 //#define ZSV_SIMULATE_CRASH 1
 
+//#define __ZSV_SECURE_TASK_BOOTSTRAP__ 1
+
+//#define __START_SERIAL_RECEIVER_TASK__ 1
+
 /*********************************************************************/
 //-- variables to model time
 /*********************************************************************/
@@ -277,6 +281,7 @@ int calling_stop_from=0;
 #define TIMER_ENF 2
 #define TIMER_ZS_ENF 3
 #define TIMER_PERIOD 4
+#define TIMER_START 5
 
 // OTHER LOCKING SITUATIONS
 #define SCHED_TASK 5
@@ -285,6 +290,7 @@ int calling_stop_from=0;
 #define STRING_TIMER_TYPE(t) ( t == TIMER_ENF ? "timer_enf" :\
 			       t == TIMER_PERIOD ? "timer_period" :\
 			       t == TIMER_ZS_ENF ? "timer_zs_enf" : \
+			       t == TIMER_START  ?  "timer_start" : \
 			       "unknown")
 
 int prevlocker=0;
@@ -1206,6 +1212,59 @@ int send_budget_enforcement_signal(struct task_struct *task, int signo, int rid)
 }
 
 
+unsigned long long calculate_start_time(int rid){
+  int i;
+  unsigned long long start_ticks=0L;
+  int eventtype=0;
+  unsigned long long now_ticks=0L;
+
+  now_ticks = get_now_ticks();
+  
+  if(!hypmtscheduler_dumpdebuglog(&debug_log, &debug_log_buffer_index)){
+    printk(KERN_INFO "ZSRMV.budget_enforcement(): dumpdebuglog hypercall API failed\n");
+  } else {
+    //printk(KERN_INFO "ZSRMV.budget_enforcement(): dumpdebuglog: total entries=%u\n", debug_log_buffer_index);
+    for (i = 0; i< debug_log_buffer_index; i++){
+      add_trace_record(debug_log[i].hyptask_id, debug_log[i].timestamp, debug_log[i].event_type);
+    }
+  }
+
+  for (i=0;i<trace_index;i++){
+    if (trace_table[i].rid == rid){
+      if (trace_table[i].event_type == DEBUG_LOG_EVTTYPE_CREATEHYPTASK_BEFORE ||
+	  trace_table[i].event_type == DEBUG_LOG_EVTTYPE_HYPTASKEXEC_BEFORE ){
+	start_ticks = trace_table[i].timestamp_ns ;
+	eventtype = trace_table[i].event_type;
+      }
+    }
+  }
+
+
+  if (eventtype != 0){
+    if (trace_table[i].event_type == DEBUG_LOG_EVTTYPE_CREATEHYPTASK_BEFORE){
+      start_ticks += reserve_table[rid].period_ticks;
+    } else if (trace_table[i].event_type == DEBUG_LOG_EVTTYPE_HYPTASKEXEC_BEFORE){
+      start_ticks += (reserve_table[rid].period_ticks - reserve_table[rid].hyp_enforcer_instant_ticks);
+    }
+
+    i=0;
+    // forward the clock up to next period in the future
+    while(start_ticks <= now_ticks){
+      start_ticks += reserve_table[rid].period_ticks;
+      // just for protecting against infinite loop
+      if (i++>100){
+	printk("ZSRM.calculate_start_time(): POTENTIAL INFINITE LOOP start(%llu) now(%llu) \n",start_ticks, now_ticks);
+	break;
+      }
+    }
+  } else {
+    printk("ZSRM.calculate_start_time(): NO HYPTASK EVENTS!!\n");
+    start_ticks = now_ticks;
+  }
+
+  return start_ticks;
+}
+
 unsigned long long calculate_hypertask_preemption_time_ticks(int rid, unsigned long long now_ticks){
   int i;
   unsigned long long cumm_hyppreemption_ticks=0L;
@@ -1579,11 +1638,9 @@ int timer_handler(struct zs_timer *timer)
   restart_timer = 0;
   
   // process the timer
-#ifdef __ZS_DEBUG__  
-  printk("ZSRMMV: timer handler rid(%d) timer-type(%s)\n",timer->rid,
-	 (timer->timer_type == TIMER_ENF? "TIMER_ENF":
-	  ( timer->timer_type == TIMER_PERIOD ? "TIMER_PERIOD" : "TIMER_ZS_ENF")));
-#endif  
+  //#ifdef __ZS_DEBUG__  
+  printk("ZSRMMV: timer handler rid(%d) timer-type(%s)\n",timer->rid,STRING_TIMER_TYPE(timer->timer_type));
+  //#endif  
 
   if (timer->rid <0 || timer->rid >= MAX_RESERVES ||(reserve_table[timer->rid].pid == -1)){
     printk("ZSRMMV: ERROR timer with invalid reserve rid(%d) or pid\n",timer->rid);
@@ -1601,6 +1658,12 @@ int timer_handler(struct zs_timer *timer)
 	break;
       case TIMER_ZS_ENF:
 	zs_enforcement(timer->rid);
+	break;
+      case TIMER_START:
+	printk("ZSRMV.timer_handler(): attaching pid(%d) to rid(%d)\n",reserve_table[timer->rid].pid,timer->rid);
+	wake_up_process(task);
+	set_tsk_need_resched(task);
+	attach_reserve(timer->rid,reserve_table[timer->rid].pid);
 	break;
       default:
 	printk("ZSRMMV: unknown type of timer\n");
@@ -1655,6 +1718,7 @@ int attach_reserve(int rid, int pid)
   reserve_table[rid].zero_slack_timer.expiration.tv_sec = reserve_table[rid].zsinstant.tv_sec;
   reserve_table[rid].zero_slack_timer.expiration.tv_nsec = reserve_table[rid].zsinstant.tv_nsec;
   reserve_table[rid].zero_slack_timer.timer_type = TIMER_ZS_ENF;
+  reserve_table[rid].start_timer.timer_type = TIMER_START;
   reserve_table[rid].next = NULL;
   reserve_table[rid].enforced=0;
   reserve_table[rid].in_critical_mode=0;
@@ -1797,11 +1861,13 @@ int delete_reserve(int rid)
   hrtimer_cancel(&(reserve_table[rid].zero_slack_timer.kernel_timer));
 
   if (reserve_table[rid].hypertask_active){
+#ifndef __ZSV_SECURE_TASK_BOOTSTRAP__
     if(!hypmtscheduler_deletehyptask(reserve_table[rid].hyptask_handle)){
       printk("ZSRMV.delete_reserve(): error deleting hypertask\n");
     } else {
       reserve_table[rid].hypertask_active=0;
     }
+#endif
   }
 
 #ifdef __ZS_DEBUG__  
@@ -2595,6 +2661,7 @@ void init_reserve(int rid)
   reserve_table[rid].enforcement_timer.next = NULL;
   reserve_table[rid].start_period=0;
   reserve_table[rid].hypertask_active=0;
+  reserve_table[rid].has_hyptask=0;
 
   printk("ZSRMV: init_reserve(rid(%d))\n",rid);
   // init timers to make sure we do not crash the kernel
@@ -2607,7 +2674,9 @@ void init_reserve(int rid)
   hrtimer_init(&(reserve_table[rid].period_timer.kernel_timer), CLOCK_MONOTONIC, HRTIMER_MODE_REL);
   hrtimer_init(&(reserve_table[rid].enforcement_timer.kernel_timer), CLOCK_MONOTONIC, HRTIMER_MODE_REL);
   hrtimer_init(&(reserve_table[rid].zero_slack_timer.kernel_timer), CLOCK_MONOTONIC, HRTIMER_MODE_REL);
-
+#ifdef __ZSV_SECURE_TASK_BOOTSTRAP__
+  hrtimer_init(&(reserve_table[rid].start_timer.kernel_timer), CLOCK_MONOTONIC, HRTIMER_MODE_REL);
+#endif
 }
 
 /*********************************************************************/
@@ -2958,21 +3027,27 @@ static void activator_task(void *a)
 	 * At this point we use the reserve id as the hypertask id as well. We may want to have a parameter pass down from the userspace
 	 * 
 	 */
-	if(!hypmtscheduler_createhyptask(
-			reserve_table[rid].hyp_enforcer_instant.tv_sec * HYPMTSCHEDULER_TIME_1SEC +
-					 (reserve_table[rid].hyp_enforcer_instant.tv_nsec / (1000 * 1000)) * HYPMTSCHEDULER_TIME_1MSEC,
+#ifndef __ZSV_SECURE_TASK_BOOTSTRAP__
+	if (reserve_table[rid].has_hyptask){
+	  if(!hypmtscheduler_createhyptask(
+					   reserve_table[rid].hyp_enforcer_instant.tv_sec * HYPMTSCHEDULER_TIME_1SEC +
+					   (reserve_table[rid].hyp_enforcer_instant.tv_nsec / (1000 * 1000)) * HYPMTSCHEDULER_TIME_1MSEC,
 
-				reserve_table[rid].period.tv_sec * HYPMTSCHEDULER_TIME_1SEC +
-					 (reserve_table[rid].period.tv_nsec / (1000 * 1000)) * HYPMTSCHEDULER_TIME_1MSEC,
+					   reserve_table[rid].period.tv_sec * HYPMTSCHEDULER_TIME_1SEC +
+					   (reserve_table[rid].period.tv_nsec / (1000 * 1000)) * HYPMTSCHEDULER_TIME_1MSEC,
 
-					 p.sched_priority, // priority
-					 rid, // 3, // hyptask_id?
-					 &(reserve_table[rid].hyptask_handle))){
-	  printk(KERN_INFO "ZSRMV.activator_task(): hypmtschedulerkmod: create_hyptask failed\n");
-	} else {
-	  reserve_table[rid].hypertask_active=1;
-	  printk("ZSRMV.activator_task(): hyptscheduler_createhyptask() SUCCESSFUL\n");
+					   p.sched_priority, // priority
+					   rid, // 3, // hyptask_id?
+					   &(reserve_table[rid].hyptask_handle))){
+	    printk(KERN_INFO "ZSRMV.activator_task(): hypmtschedulerkmod: create_hyptask failed\n");
+	  } else {
+	    reserve_table[rid].hypertask_active=1;
+	    printk("ZSRMV.activator_task(): hyptscheduler_createhyptask() SUCCESSFUL\n");
+	  }
 	}
+#else
+	reserve_table[rid].hypertask_active=1;
+#endif
       }      
     }    
     set_current_state(TASK_INTERRUPTIBLE);
@@ -3256,11 +3331,13 @@ u8 serial_receiving_buffer[SERIAL_RECEIVING_BUFFER_SIZE];
 static DECLARE_WAIT_QUEUE_HEAD(serial_read_wait_queue);
 
 // point to next byte to read
-int serial_receiving_reading_index=0;
+volatile int serial_receiving_reading_index=0;
 
 // point to next byte to write
-int serial_receiving_writing_index=0;
-int waiting_for_input=0;
+volatile int serial_receiving_writing_index=0;
+volatile int waiting_for_input=0;
+
+int serial_data_dropped=0;
 
 int serial_receiving_buffer_write(u8 *buffer, int len)
 {
@@ -3279,6 +3356,12 @@ int serial_receiving_buffer_write(u8 *buffer, int len)
     wrote++;
   }
 
+  // Were there bytes I could not write?
+  if (SERIAL_CIRCULAR_INC(serial_receiving_writing_index) == serial_receiving_reading_index && i<len){
+    serial_data_dropped=1;
+    printk("ZSRM.serial)receiving_buffer_write(): buffer full dropped %d bytes\n",(len-i));
+  }
+  
   if (wasempty){
     wake_up_interruptible(&serial_read_wait_queue);
   }
@@ -3349,7 +3432,7 @@ static void serial_receiver_task(void *a)
 	//readbufferexhausted=false;
       //}
     //printk("ZSRM.serial_receiver_task(): finished reading %d bytes\n",len_read);
-    usleep_range(140,150);
+    usleep_range(1400,150);
   }
 
   printk("ZSRMV.serial_receiver_task() EXITING\n");
@@ -3363,9 +3446,9 @@ int init_serial(u32 bauds)
 {
   mavlinkserhb_initialize(bauds);
   
-  if (!mavlinkserhb_activatehbhyptask(300 * HYPMTSCHEDULER_TIME_1USEC, 300 * HYPMTSCHEDULER_TIME_1USEC, 10)){
-    printk("ZSRM.init_serial(): error starting serial hyptask\n");
-  }
+  /* if (!mavlinkserhb_activatehbhyptask(300 * HYPMTSCHEDULER_TIME_1USEC, 300 * HYPMTSCHEDULER_TIME_1USEC, 10)){ */
+  /*   printk("ZSRM.init_serial(): error starting serial hyptask\n"); */
+  /* } */
   /* if(!hypmtscheduler_createhyptask(300 * HYPMTSCHEDULER_TIME_1USEC, // FIRST TIMER */
   /* 				   300 * HYPMTSCHEDULER_TIME_1USEC, // FOLLOW UP TIMERS */
   /* 				   10, // PRIORITY */
@@ -3633,10 +3716,21 @@ static ssize_t zsrm_write
       reserve_table[ret].period.tv_nsec = call.period_nsec;
       reserve_table[ret].zsinstant.tv_sec = call.zsinstant_sec;
       reserve_table[ret].zsinstant.tv_nsec = call.zsinstant_nsec;
-      reserve_table[ret].hyp_enforcer_instant.tv_sec = call.hyp_enforcer_sec;
-      reserve_table[ret].hyp_enforcer_instant.tv_nsec = call.hyp_enforcer_nsec;
+
+      // if hyp enforcer is negative then the hyptask does not exists
+      if (call.hyp_enforcer_sec <0 || call.hyp_enforcer_nsec <0){
+	reserve_table[ret].hyp_enforcer_instant.tv_sec = 0;
+	reserve_table[ret].hyp_enforcer_instant.tv_nsec = 0;
+	reserve_table[ret].has_hyptask = 0;
+      } else {
+	reserve_table[ret].hyp_enforcer_instant.tv_sec = call.hyp_enforcer_sec;
+	reserve_table[ret].hyp_enforcer_instant.tv_nsec = call.hyp_enforcer_nsec;
+	reserve_table[ret].has_hyptask = 1;
+      }
+      
       reserve_table[ret].period_ns = (call.period_sec * 1000000000L) +
 	call.period_nsec;
+      reserve_table[ret].period_ticks = ns2ticks(reserve_table[ret].period_ns);
       reserve_table[ret].execution_time.tv_sec = call.exec_sec;
       reserve_table[ret].execution_time.tv_nsec = call.exec_nsec;
       reserve_table[ret].exectime_ns = (call.exec_sec * 1000000000L) +
@@ -3695,12 +3789,31 @@ static ssize_t zsrm_write
 	     STRING_ZSV_CALL(call.cmd),call.rid);
       ret = -1;
     } else {
+      unsigned long long start_ticks, start_ns;
       if (call.pid <=0){
 	printk("ZSRMMV.write() ERROR got cmd(%s) with invalid pid(%d)\n",
 	       STRING_ZSV_CALL(call.cmd),call.pid);
 	ret = -1;
       } else {
+#ifdef __ZSV_SECURE_TASK_BOOTSTRAP__
+	start_ticks = calculate_start_time(call.rid);
+	start_ns = ticks2ns1(start_ticks);
+	struct pid_namespace *ns = task_active_pid_ns(current);
+	printk("ZSRM.attach: attach to happen in %llu ns\n",(start_ns-ticks2ns1(get_now_ticks())));
+	reserve_table[call.rid].pid = call.pid;
+	reserve_table[call.rid].task_namespace = task_active_pid_ns(current);
+	reserve_table[call.rid].start_timer.timer_type = TIMER_START;
+	reserve_table[call.rid].start_timer.expiration = ktime_to_timespec(ns_to_ktime(start_ns));
+	add_timerq(&(reserve_table[call.rid].start_timer));
+	
+	// put caller task to sleep
+	set_current_state(TASK_INTERRUPTIBLE);
+	
+	ret = 0;
+	need_reschedule=0;
+#else	
 	ret = attach_reserve(call.rid,call.pid);
+#endif
 	need_reschedule=1;
       }
     }
@@ -3899,23 +4012,24 @@ static int __init zsrm_init(void)
   
   kthread_bind(active_task, 0);
 
+#ifdef __START_SERIAL_RECEIVER_TASK__
   // Start serial receiver task
-  /* serial_recv_task = kthread_create((void *)serial_receiver_task, NULL, "Serial receiver thread"); */
+  serial_recv_task = kthread_create((void *)serial_receiver_task, NULL, "Serial receiver thread");
 
-  /* printk("ZSRMV: created serial receiver task ptr=%x\n",serial_recv_task); */
+  printk("ZSRMV: created serial receiver task ptr=%x\n",serial_recv_task);
   
-  /* p.sched_priority = DAEMON_PRIORITY; */
+  p.sched_priority = DAEMON_PRIORITY;
   
-  /* if (sched_setscheduler(serial_recv_task, SCHED_FIFO, &p)<0){ */
-  /*   printk("ZSRMMV.init() error setting serial_receiver_task kernel thead priority\n"); */
-  /* } */
+  if (sched_setscheduler(serial_recv_task, SCHED_FIFO, &p)<0){
+    printk("ZSRMMV.init() error setting serial_receiver_task kernel thead priority\n");
+  }
   
-  /* kthread_bind(serial_recv_task, 0); */
+  kthread_bind(serial_recv_task, 0);
 
-  /* if (serial_recv_task){ */
-  /*   wake_up_process(serial_recv_task); */
-  /* } */
-
+  if (serial_recv_task){
+    wake_up_process(serial_recv_task);
+  }
+#endif 
   
   init_cputsc();
 
@@ -4012,7 +4126,9 @@ static void __exit zsrm_exit(void)
   activate_top = -1;
   kthread_stop(active_task);
 
-  /* kthread_stop(serial_recv_task); */
+#ifdef  __START_SERIAL_RECEIVER_TASK__
+  kthread_stop(serial_recv_task);
+#endif
 
   /* if (serial_recv_task_running){ */
   /*   serial_recv_task_running = 0; */

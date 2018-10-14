@@ -128,6 +128,7 @@ struct reserve {
   struct timespec execution_time;
   struct timespec nominal_execution_time;
   int hypertask_active;
+  int has_hyptask;
   uint32_t hyptask_handle; // u32
   int priority;
   int criticality;
@@ -137,6 +138,7 @@ struct reserve {
   struct zs_timer period_timer;
   struct zs_timer enforcement_timer;
   struct zs_timer zero_slack_timer;
+  struct zs_timer start_timer;
   struct reserve *next;
   struct reserve *rm_next;
   struct reserve *crit_next;
