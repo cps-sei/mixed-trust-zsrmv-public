@@ -46,6 +46,8 @@ DM-0000891
 #include <linux/syscalls.h>
 #include <linux/signal.h>
 
+#include <linux/gpio.h>
+
 #include <linux/clocksource.h>
 #include <linux/timekeeping.h>
 #include <linux/delay.h>
@@ -91,11 +93,25 @@ u32 debug_log_buffer_index = 0;
 
 //#define __ZSV_SECURE_TASK_BOOTSTRAP__ 1
 
-//#define __START_SERIAL_RECEIVER_TASK__ 1
+#define __START_SERIAL_RECEIVER_TASK__ 1
+
+#define __SERIAL_HARDWARE_CONTROL_FLOW__ 1
 
 /*********************************************************************/
 //-- variables to model time
 /*********************************************************************/
+
+
+#define GPIO_RTS 17
+#define GPIO_CTS 18
+
+void serial_stop_transmission(void){
+  gpio_set_value(GPIO_RTS, 0);
+}
+
+void serial_resume_transmission(void){
+  gpio_set_value(GPIO_RTS, 1);
+}
 
 //-- ghost variable: the current time
 unsigned long long stac_now = 0;
@@ -3341,10 +3357,13 @@ int serial_data_dropped=0;
 
 int serial_receiving_buffer_write(u8 *buffer, int len)
 {
+  static int reported_full=0;
+  static int invocation_cnt=0;
   int wrote=0;
   int i=0;
   int wasempty=0;
 
+  invocation_cnt++;
   down_interruptible(&serial_buffer_sem);
 
   wasempty = (serial_receiving_writing_index == serial_receiving_reading_index);
@@ -3359,7 +3378,10 @@ int serial_receiving_buffer_write(u8 *buffer, int len)
   // Were there bytes I could not write?
   if (SERIAL_CIRCULAR_INC(serial_receiving_writing_index) == serial_receiving_reading_index && i<len){
     serial_data_dropped=1;
-    printk("ZSRM.serial)receiving_buffer_write(): buffer full dropped %d bytes\n",(len-i));
+    if (!reported_full){
+      printk("ZSRM.serial_receiving_buffer_write(): invocation(%d) len(%d) buffer full dropped %d bytes\n",invocation_cnt, len, (len-i));
+      reported_full=1;
+    }
   }
   
   if (wasempty){
@@ -3413,28 +3435,28 @@ static void serial_receiver_task(void *a)
   
   while (!kthread_should_stop()) {
     len_read=0;
-    //while(mavlinkserhb_checkrecv()){
     //do {
-	if(mavlinkserhb_recv(&buffer, sizeof(buffer), &len_read, &readbufferexhausted)){
-	  //wasempty = (serial_receiving_writing_index == serial_receiving_reading_index);
-	  if (len_read >0){
-	    serial_receiving_buffer_write(buffer,len_read);
-	    //printk("ZSRM.serial_receiver_task(): finished reading %d bytes\n",len_read);
-	  }
-	  //if (wasempty){
-	  //  wake_up_interruptible(&serial_read_wait_queue);
-	  //}
-	} else {
-	  //readbufferexhausted=true;
-	  //printk("ZSRM.serial_receiver_task(): ERROR in mavlinkserhb_recv()\n");
-	}
-	//} while(!readbufferexhausted);
-	//readbufferexhausted=false;
-      //}
+#ifdef __SERIAL_HARDWARE_CONTROL_FLOW__      
+    serial_stop_transmission();
+#endif
+    if(mavlinkserhb_recv(&buffer, sizeof(buffer), &len_read, &readbufferexhausted)){
+      if (len_read >0){
+	serial_receiving_buffer_write(buffer,len_read);
+	//printk("ZSRM.serial_receiver_task(): finished reading %d bytes\n",len_read);
+      }
+    } else {
+	readbufferexhausted=true;
+	//printk("ZSRM.serial_receiver_task(): ERROR in mavlinkserhb_recv()\n");
+    }
+    //} while(!readbufferexhausted);
+    readbufferexhausted=false;
     //printk("ZSRM.serial_receiver_task(): finished reading %d bytes\n",len_read);
-    usleep_range(1400,150);
+#ifdef __SERIAL_HARDWARE_CONTROL_FLOW__      
+    serial_resume_transmission();
+#endif
+    usleep_range(590,600);
   }
-
+  
   printk("ZSRMV.serial_receiver_task() EXITING\n");
 }
 
@@ -4012,6 +4034,25 @@ static int __init zsrm_init(void)
   
   kthread_bind(active_task, 0);
 
+
+  // For serial hardware control flow
+#ifdef __SERIAL_HARDWARE_CONTROL_FLOW__      
+  if (gpio_request(GPIO_RTS, "RTS") <0){
+    printk("ZSRM.init(): error requesting gpio pin 17\n");
+  }
+  if (gpio_request(GPIO_CTS, "CTS")<0){
+    printk("ZSRM.init(): error requesting gpio pin 18\n");
+  }
+
+  if (gpio_direction_input(GPIO_CTS)<0){
+    printk("ZSRM.init(): error setting input direction for CTS\n");
+  }
+  
+  if (gpio_direction_output(GPIO_RTS,0)<0){
+    printk("ZSRM.init(): error setting output direction and setting RTS to zero\n");
+  }
+#endif
+  
 #ifdef __START_SERIAL_RECEIVER_TASK__
   // Start serial receiver task
   serial_recv_task = kthread_create((void *)serial_receiver_task, NULL, "Serial receiver thread");
@@ -4145,6 +4186,11 @@ static void __exit zsrm_exit(void)
   printk(KERN_INFO "ZSRMMV: GOODBYE!\n");
   
   zsrm_cleanup_module();
+
+#ifdef __SERIAL_HARDWARE_CONTROL_FLOW__      
+  gpio_free(GPIO_CTS);
+  gpio_free(GPIO_RTS);
+#endif
   
 }
 

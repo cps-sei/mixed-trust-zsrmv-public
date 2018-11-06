@@ -64,7 +64,7 @@ DM-0000891
 int main(int argc, char *argv[])
 {
   int schedfd;
-  int line=0;
+  int line=1;
 
   char buffer[20];
   int len=20;
@@ -80,7 +80,8 @@ int main(int argc, char *argv[])
   do {
     if (len = zsv_mtserial_recv(schedfd, 0, buffer,20)){
       for(i=0;i<len;i++){
-	printf("%d: %d\n",line++,buffer[i]);
+	printf("%d: %d\n",line,buffer[i]);
+	line = (line + 1) % 256;
       }
     } else {
       printf("could not read anything\n");
