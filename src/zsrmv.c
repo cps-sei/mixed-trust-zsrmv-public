@@ -42,6 +42,7 @@ DM-0000891
 #include <linux/cdev.h>
 #include <linux/version.h>
 #include <linux/module.h>
+#include <linux/moduleparam.h>
 #include <linux/kthread.h>
 #include <linux/syscalls.h>
 #include <linux/signal.h>
@@ -103,7 +104,10 @@ u32 debug_log_buffer_index = 0;
 
 
 #define GPIO_RTS 17
-#define GPIO_CTS 18
+#define GPIO_CTS 6
+
+static int cts_gpio_pin=GPIO_CTS;
+module_param(cts_gpio_pin, int, 0660);
 
 void serial_stop_transmission(void){
   gpio_set_value(GPIO_RTS, 0);
@@ -111,6 +115,10 @@ void serial_stop_transmission(void){
 
 void serial_resume_transmission(void){
   gpio_set_value(GPIO_RTS, 1);
+}
+
+int serial_is_reception_stopped(void){
+  return gpio_get_value(cts_gpio_pin);
 }
 
 //-- ghost variable: the current time
@@ -330,6 +338,7 @@ int zsrmcall=-1;
 struct task_struct *sched_task;
 struct task_struct *active_task;
 struct task_struct *serial_recv_task;
+struct task_struct *serial_sender_task;
 
 struct reserve reserve_table[MAX_RESERVES];
 
@@ -3342,7 +3351,7 @@ struct semaphore serial_buffer_sem;
 
 u8 serial_receiving_buffer[SERIAL_RECEIVING_BUFFER_SIZE];
 
-#define SERIAL_CIRCULAR_INC(a) ( (a==SERIAL_RECEIVING_BUFFER_SIZE-1) ? 0 : a+1)
+#define SERIAL_RECEIVING_CIRCULAR_INC(a) ( (a==SERIAL_RECEIVING_BUFFER_SIZE-1) ? 0 : a+1)
 
 static DECLARE_WAIT_QUEUE_HEAD(serial_read_wait_queue);
 
@@ -3368,15 +3377,15 @@ int serial_receiving_buffer_write(u8 *buffer, int len)
 
   wasempty = (serial_receiving_writing_index == serial_receiving_reading_index);
 
-  while(SERIAL_CIRCULAR_INC(serial_receiving_writing_index) != serial_receiving_reading_index && i<len){
+  while(SERIAL_RECEIVING_CIRCULAR_INC(serial_receiving_writing_index) != serial_receiving_reading_index && i<len){
     serial_receiving_buffer[serial_receiving_writing_index] = buffer[i];
-    serial_receiving_writing_index = SERIAL_CIRCULAR_INC(serial_receiving_writing_index);
+    serial_receiving_writing_index = SERIAL_RECEIVING_CIRCULAR_INC(serial_receiving_writing_index);
     i++;
     wrote++;
   }
 
   // Were there bytes I could not write?
-  if (SERIAL_CIRCULAR_INC(serial_receiving_writing_index) == serial_receiving_reading_index && i<len){
+  if (SERIAL_RECEIVING_CIRCULAR_INC(serial_receiving_writing_index) == serial_receiving_reading_index && i<len){
     serial_data_dropped=1;
     if (!reported_full){
       printk("ZSRM.serial_receiving_buffer_write(): invocation(%d) len(%d) buffer full dropped %d bytes\n",invocation_cnt, len, (len-i));
@@ -3409,7 +3418,7 @@ int serial_receiving_buffer_read(u8 *buffer, int len)
   
   while(serial_receiving_writing_index != serial_receiving_reading_index && i<len){
     buffer[i] = serial_receiving_buffer[serial_receiving_reading_index];
-    serial_receiving_reading_index = SERIAL_CIRCULAR_INC(serial_receiving_reading_index);
+    serial_receiving_reading_index = SERIAL_RECEIVING_CIRCULAR_INC(serial_receiving_reading_index);
     i++;
     read++;
   }
@@ -3461,6 +3470,103 @@ static void serial_receiver_task(void *a)
 }
 
 
+#define SERIAL_SENDING_BUFFER_SIZE 1024
+
+struct semaphore serial_sending_buffer_sem;
+
+u8 serial_sending_buffer[SERIAL_SENDING_BUFFER_SIZE];
+
+#define SERIAL_SENDING_CIRCULAR_INC(a) ( (a == SERIAL_SENDING_BUFFER_SIZE-1) ? 0 : a+1)
+
+static DECLARE_WAIT_QUEUE_HEAD(serial_write_wait_queue);
+
+// point ot next byte to read
+volatile int serial_sending_reading_index=0;
+
+// point to next byte to write
+volatile int serial_sending_writing_index=0;
+
+int serial_sending_buffer_write(u8 *buffer, int len){
+  int was_empty=0;
+  int i=0;
+  int wrote=0;
+
+  down_interruptible(&serial_sending_buffer_sem);
+
+  was_empty = (serial_sending_writing_index == serial_sending_reading_index);
+
+  while(SERIAL_SENDING_CIRCULAR_INC(serial_sending_writing_index) != serial_sending_reading_index && i < len){
+    serial_sending_buffer[serial_sending_writing_index] = buffer[i];
+    serial_sending_writing_index = SERIAL_SENDING_CIRCULAR_INC(serial_sending_writing_index);
+    i++;
+    wrote++;
+  }
+
+  if (SERIAL_SENDING_CIRCULAR_INC(serial_sending_writing_index) == serial_sending_reading_index && i<len){
+    printk("ZSRM.serial_sending_buffer_write(): dropped data\n");
+  }
+
+  if (was_empty){
+    // wakeup transmiter kernel task
+    wake_up_process(serial_sender_task);
+  }
+
+  up(&serial_sending_buffer_sem);
+
+  return wrote;
+}
+
+int serial_sending_buffer_read(u8 *buffer, int len){
+  int i=0;
+  int read=0;
+
+  down_interruptible(&serial_sending_buffer_sem);
+
+  if (serial_sending_writing_index == serial_sending_reading_index){
+    up(&serial_sending_buffer_sem);
+    // if sending task receives zero it should go to sleep
+    return 0;
+  }
+
+  while(serial_sending_writing_index != serial_sending_reading_index && i<len){
+    buffer[i] = serial_sending_buffer[serial_sending_reading_index];
+    serial_sending_reading_index = SERIAL_SENDING_CIRCULAR_INC(serial_sending_reading_index);
+    i++;
+    read++;
+  }
+
+  up(&serial_sending_buffer_sem);
+  
+  return read;
+
+}
+
+static void serial_sending_task(void *a){
+  int read=0;
+  u8  buffer[100];
+  int sending_index=0;
+  int batch_size;
+  int ret;
+  
+  while(!kthread_should_stop()){
+    sending_index=0;
+    if ((read = serial_sending_buffer_read(buffer, 100)) > 0){
+      while(sending_index < read){
+	batch_size = (read-sending_index > 8 ) ? 8 : (read-sending_index);
+	while(serial_is_reception_stopped()){
+	  usleep_range(590,600);
+	}
+	ret = mavlinkserhb_send(&buffer[sending_index],batch_size);
+	sending_index += batch_size;
+      }
+    } else {
+      // go to sleep
+      set_current_state(TASK_INTERRUPTIBLE);
+      schedule();
+    }
+  }
+}
+
 uint32_t hyp_serial_recv_task_handle=-1;
 int serial_recv_task_running=0;
 
@@ -3491,7 +3597,8 @@ int send(int rid, void *buffer, int buf_len, int finished)
 
   if (finished){
     if (kernel_entry_timestamp_ticks <= reserve_table[rid].current_job_deadline_ticks){
-      ret = mavlinkserhb_send(buffer,buf_len);
+      //ret = mavlinkserhb_send(buffer,buf_len);
+      ret = (serial_sending_buffer_write(buffer, buf_len)>0) ?1 : 0;
       wait_for_next_period(rid,
 			   0,
 			   1 // disableHypertask -- normal actuation sent on time
@@ -3505,7 +3612,8 @@ int send(int rid, void *buffer, int buf_len, int finished)
 			   );
     }
   } else {
-    ret = mavlinkserhb_send(buffer,buf_len);
+    //ret = mavlinkserhb_send(buffer,buf_len);
+    ret = (serial_sending_buffer_write(buffer,buf_len) >0) ? 1: 0;
   }
   
   return ret;
@@ -3948,7 +4056,9 @@ static int __init zsrm_init(void)
   /* u64 start_tick; */
   /* u64 end_tick; */
   int cnt;
-    
+
+  printk("ZSRMV.init(): cts_gpio_pin set to %d\n",cts_gpio_pin);
+  
   // initialize scheduling top
   top = -1;
   
@@ -3958,6 +4068,8 @@ static int __init zsrm_init(void)
   // serial buffer semaphore
   // binary -- initially unlocked
   sema_init(&serial_buffer_sem,1);
+
+  sema_init(&serial_sending_buffer_sem,1);
 
   init();
   printk(KERN_INFO "ZSRMMV: HELLO!\n");
@@ -4040,11 +4152,11 @@ static int __init zsrm_init(void)
   if (gpio_request(GPIO_RTS, "RTS") <0){
     printk("ZSRM.init(): error requesting gpio pin 17\n");
   }
-  if (gpio_request(GPIO_CTS, "CTS")<0){
+  if (gpio_request(cts_gpio_pin, "CTS")<0){
     printk("ZSRM.init(): error requesting gpio pin 18\n");
   }
 
-  if (gpio_direction_input(GPIO_CTS)<0){
+  if (gpio_direction_input(cts_gpio_pin)<0){
     printk("ZSRM.init(): error setting input direction for CTS\n");
   }
   
@@ -4071,6 +4183,24 @@ static int __init zsrm_init(void)
     wake_up_process(serial_recv_task);
   }
 #endif 
+
+
+    // Start serial sender task
+  serial_sender_task = kthread_create((void *)serial_sending_task, NULL, "Serial sender thread");
+
+  printk("ZSRMV: created serial sender task ptr=%x\n",serial_sender_task);
+  
+  p.sched_priority = DAEMON_PRIORITY;
+  
+  if (sched_setscheduler(serial_sender_task, SCHED_FIFO, &p)<0){
+    printk("ZSRMMV.init() error setting serial_sender_task kernel thead priority\n");
+  }
+  
+  kthread_bind(serial_sender_task, 0);
+
+  if (serial_sender_task){
+    wake_up_process(serial_sender_task);
+  }
   
   init_cputsc();
 
@@ -4171,6 +4301,9 @@ static void __exit zsrm_exit(void)
   kthread_stop(serial_recv_task);
 #endif
 
+  kthread_stop(serial_sender_task);
+
+  
   /* if (serial_recv_task_running){ */
   /*   serial_recv_task_running = 0; */
   /*   if(!hypmtscheduler_deletehyptask(hyp_serial_recv_task_handle)){ */
@@ -4188,7 +4321,7 @@ static void __exit zsrm_exit(void)
   zsrm_cleanup_module();
 
 #ifdef __SERIAL_HARDWARE_CONTROL_FLOW__      
-  gpio_free(GPIO_CTS);
+  gpio_free(cts_gpio_pin);
   gpio_free(GPIO_RTS);
 #endif
   
