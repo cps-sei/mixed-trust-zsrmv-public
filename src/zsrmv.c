@@ -43,6 +43,9 @@ DM-0000891
 #include <linux/version.h>
 #include <linux/module.h>
 #include <linux/moduleparam.h>
+
+#include <linux/proc_fs.h>
+
 #include <linux/kthread.h>
 #include <linux/syscalls.h>
 #include <linux/signal.h>
@@ -110,11 +113,11 @@ static int cts_gpio_pin=GPIO_CTS;
 module_param(cts_gpio_pin, int, 0660);
 
 void serial_stop_transmission(void){
-  gpio_set_value(GPIO_RTS, 0);
+  gpio_set_value(GPIO_RTS, 1);//0);
 }
 
 void serial_resume_transmission(void){
-  gpio_set_value(GPIO_RTS, 1);
+  gpio_set_value(GPIO_RTS, 0);//1);
 }
 
 int serial_is_reception_stopped(void){
@@ -339,6 +342,20 @@ struct task_struct *sched_task;
 struct task_struct *active_task;
 struct task_struct *serial_recv_task;
 struct task_struct *serial_sender_task;
+
+u32 serial_debug_flags=0;
+
+#define SERIAL_FLAG_RCV_READ_BLOCKED 1
+#define SERIAL_FLAG_SND_READ_BLOCKED 2
+#define SERIAL_FLAG_HWR_RCV_BLOCKED 4
+#define SERIAL_FLAG_HWR_SND_BLOCKED 8
+
+inline void SERIAL_DEBUG_FLAG_ON(u32 FLAG) {
+  serial_debug_flags |= FLAG;
+}
+inline void SERIAL_DEBUG_FLAG_OFF(u32 FLAG){
+  serial_debug_flags &= ~(FLAG);
+}
 
 struct reserve reserve_table[MAX_RESERVES];
 
@@ -3392,10 +3409,12 @@ int serial_receiving_buffer_write(u8 *buffer, int len)
       reported_full=1;
     }
   }
-  
-  if (wasempty){
-    wake_up_interruptible(&serial_read_wait_queue);
-  }
+
+  // Try always sending the wakeup
+  //if (wasempty){
+  wake_up_interruptible(&serial_read_wait_queue);
+  //printk("ZSRM.serial_receiving_buffer_write(): wasempty SENT wakeup\n");
+  //}
 
   up(&serial_buffer_sem);
   
@@ -3411,8 +3430,11 @@ int serial_receiving_buffer_read(u8 *buffer, int len)
 
   if (serial_receiving_writing_index == serial_receiving_reading_index){
     up(&serial_buffer_sem);
+    //printk("ZSRM.serial_receiving_buffer_read(): EMPTY going to sleep\n");
+    SERIAL_DEBUG_FLAG_ON(SERIAL_FLAG_RCV_READ_BLOCKED);
     wait_event_interruptible(serial_read_wait_queue, 
     			     (serial_receiving_writing_index != serial_receiving_reading_index ));
+    SERIAL_DEBUG_FLAG_OFF(SERIAL_FLAG_RCV_READ_BLOCKED);
     down_interruptible(&serial_buffer_sem);
   }
   
@@ -3447,6 +3469,7 @@ static void serial_receiver_task(void *a)
     //do {
 #ifdef __SERIAL_HARDWARE_CONTROL_FLOW__      
     serial_stop_transmission();
+    SERIAL_DEBUG_FLAG_ON(SERIAL_FLAG_HWR_SND_BLOCKED);
 #endif
     if(mavlinkserhb_recv(&buffer, sizeof(buffer), &len_read, &readbufferexhausted)){
       if (len_read >0){
@@ -3462,8 +3485,9 @@ static void serial_receiver_task(void *a)
     //printk("ZSRM.serial_receiver_task(): finished reading %d bytes\n",len_read);
 #ifdef __SERIAL_HARDWARE_CONTROL_FLOW__      
     serial_resume_transmission();
+    SERIAL_DEBUG_FLAG_OFF(SERIAL_FLAG_HWR_SND_BLOCKED);
 #endif
-    usleep_range(590,600);
+    usleep_range(290,300);
   }
   
   printk("ZSRMV.serial_receiver_task() EXITING\n");
@@ -3506,10 +3530,11 @@ int serial_sending_buffer_write(u8 *buffer, int len){
     printk("ZSRM.serial_sending_buffer_write(): dropped data\n");
   }
 
-  if (was_empty){
+  //if (was_empty){
     // wakeup transmiter kernel task
-    wake_up_process(serial_sender_task);
-  }
+  wake_up_process(serial_sender_task);
+  //wake_up_interruptible(&serial_write_wait_queue);
+   //}
 
   up(&serial_sending_buffer_sem);
 
@@ -3524,6 +3549,10 @@ int serial_sending_buffer_read(u8 *buffer, int len){
 
   if (serial_sending_writing_index == serial_sending_reading_index){
     up(&serial_sending_buffer_sem);
+    /* wait_event_interruptible(serial_write_wait_queue,  */
+    /* 			     (serial_sending_writing_index != serial_sending_reading_index )); */
+
+    /* down_interruptible(&serial_sending_buffer_sem); */
     // if sending task receives zero it should go to sleep
     return 0;
   }
@@ -3541,6 +3570,8 @@ int serial_sending_buffer_read(u8 *buffer, int len){
 
 }
 
+static int sending_task_active=1;
+
 static void serial_sending_task(void *a){
   int read=0;
   u8  buffer[100];
@@ -3549,20 +3580,24 @@ static void serial_sending_task(void *a){
   int ret;
   
   while(!kthread_should_stop()){
-    sending_index=0;
-    if ((read = serial_sending_buffer_read(buffer, 100)) > 0){
-      while(sending_index < read){
-	batch_size = (read-sending_index > 8 ) ? 8 : (read-sending_index);
-	while(serial_is_reception_stopped()){
-	  usleep_range(590,600);
+    while(sending_task_active){
+      sending_index=0;
+      if ((read = serial_sending_buffer_read(buffer, 100)) > 0){
+	while(sending_index < read){
+	  batch_size = (read-sending_index > 8 ) ? 8 : (read-sending_index);
+	  while(serial_is_reception_stopped()){
+	    usleep_range(590,600);
+	  }
+	  ret = mavlinkserhb_send(&buffer[sending_index],batch_size);
+	  sending_index += batch_size;
 	}
-	ret = mavlinkserhb_send(&buffer[sending_index],batch_size);
-	sending_index += batch_size;
+      } else {
+	// go to sleep
+	SERIAL_DEBUG_FLAG_ON(SERIAL_FLAG_SND_READ_BLOCKED);
+	set_current_state(TASK_INTERRUPTIBLE);
+	schedule();
+	SERIAL_DEBUG_FLAG_OFF(SERIAL_FLAG_SND_READ_BLOCKED);
       }
-    } else {
-      // go to sleep
-      set_current_state(TASK_INTERRUPTIBLE);
-      schedule();
     }
   }
 }
@@ -4041,6 +4076,120 @@ zsrm_cleanup_module(void){
   unregister_chrdev_region(dev_id, 1);	  
 }
 
+void print_overhead_stats(void)
+{
+  unsigned long long avg_context_switch_ns=0L;
+  unsigned long long avg_enforcement_ns=0L;
+  unsigned long long avg_zs_enforcement_ns=0L;
+  unsigned long long avg_arrival_ns=0L;
+  unsigned long long avg_blocked_arrival_ns=0L;
+  unsigned long long avg_departure_ns = 0L;
+
+  if (num_context_switches >0){
+    avg_context_switch_ns = DIV(cumm_context_switch_ticks,num_context_switches);
+    /* avg_context_switch_ns = cumm_context_switch_ticks / num_context_switches; */
+    avg_context_switch_ns = ticks2ns(avg_context_switch_ns);
+  }
+
+  if (num_enforcements>0){
+    avg_enforcement_ns = DIV(cumm_enforcement_ticks,num_enforcements);
+    /* avg_enforcement_ns = cumm_enforcement_ticks / num_enforcements; */
+    avg_enforcement_ns = ticks2ns(avg_enforcement_ns);
+  }
+
+  if (num_zs_enforcements>0){
+    avg_zs_enforcement_ns = DIV(cumm_zs_enforcement_ticks,num_zs_enforcements);
+    /* avg_zs_enforcement_ns = cumm_zs_enforcement_ticks / num_zs_enforcements; */
+    avg_zs_enforcement_ns = ticks2ns(avg_zs_enforcement_ns);
+  }
+
+  if (num_arrivals >0){
+    avg_arrival_ns = DIV(cumm_arrival_ticks,num_arrivals);
+    /* avg_arrival_ns = cumm_arrival_ticks / num_arrivals; */
+    avg_arrival_ns = ticks2ns(avg_arrival_ns);
+  }
+
+  if (num_blocked_arrivals>0){
+    avg_blocked_arrival_ns = DIV(cumm_blocked_arrival_ticks,num_blocked_arrivals);
+    /* avg_blocked_arrival_ns = cumm_blocked_arrival_ticks / num_blocked_arrivals; */
+    avg_blocked_arrival_ns = ticks2ns(avg_blocked_arrival_ns);
+  }
+
+  if (num_departures >0){
+    avg_departure_ns = DIV(cumm_departure_ticks,num_departures);
+    /* avg_departure_ns = cumm_departure_ticks / num_departures; */
+    avg_departure_ns = ticks2ns(avg_departure_ns);
+  }
+
+  printk("zsrmv *** OVERHEAD STATS *** \n");
+  printk("avg context switch ns: %llu \t num context switch %llu \n",
+	 avg_context_switch_ns, num_context_switches);
+  printk("avg enforcement ns: %llu num enforcements: %llu \n",
+	 avg_enforcement_ns, num_enforcements);
+  printk("avg zs enforcement ns: %llu num zs enforcements: %llu \n",
+	 avg_zs_enforcement_ns, num_zs_enforcements);
+  printk("avg arrival ns: %llu num arrivals: %llu \n",
+	 avg_arrival_ns, num_arrivals);
+  printk("avg blocked arrival ns: %llu num blocked arrivals: %llu\n",
+	 avg_blocked_arrival_ns, num_blocked_arrivals);
+  printk("avg departure ns: %llu num departures: %llu\n",
+	 avg_departure_ns, num_departures);
+  printk("zsrmv *** END OVERHEAD STATS *** \n");  
+}
+
+static struct proc_dir_entry *proc_file = NULL;
+static struct file_operations proc_fops;
+
+/* dummy function. */
+static int proc_open(struct inode *inode, struct file *filp)
+{
+  return 0;
+}
+
+/* dummy function. */
+static int proc_release(struct inode *inode, struct file *filp)
+{
+  return 0;
+}
+
+static ssize_t proc_read(struct file *filp,	/* see include/linux/fs.h   */
+			   char *buffer,	/* buffer to fill with data */
+			   size_t length,	/* length of the buffer     */
+			   loff_t * offset)
+{
+    int len;
+    static int eof=0;
+
+    if (!eof){
+      len = sprintf(buffer,"Receiver:%s Sender:%s HWR RCV:%s HWR SND: %s Recv buffer: %s Trans buffer: %s\n",
+		    ((serial_debug_flags & SERIAL_FLAG_RCV_READ_BLOCKED)? "BLOCKED" : "RUNNING"),
+		    ((serial_debug_flags & SERIAL_FLAG_SND_READ_BLOCKED)? "BLOCKED" : "RUNNING"),
+		    ((serial_is_reception_stopped())? "STOPPED" : "FREE"),
+		    ((serial_debug_flags & SERIAL_FLAG_HWR_SND_BLOCKED)? "STOPPED" : "FREE"),
+		    ((serial_receiving_writing_index == serial_receiving_reading_index)? "EMPTY" : "DATA"),
+		    ((serial_sending_writing_index == serial_sending_reading_index)? "EMPTY" : "DATA")		    
+		    );
+    } else {
+      // send eof
+      len = 0 ; 
+    }
+
+    eof = 1-eof;
+    
+    return len;
+}
+
+static ssize_t proc_write (struct file *file, const char *buf, size_t count, loff_t *offset)
+{
+}
+
+static long proc_ioctl(struct file *file,
+		       unsigned int cmd, 
+		       unsigned long arg)
+{
+	return 0;
+}
+
 
 static int __init zsrm_init(void)
 {
@@ -4058,6 +4207,20 @@ static int __init zsrm_init(void)
   int cnt;
 
   printk("ZSRMV.init(): cts_gpio_pin set to %d\n",cts_gpio_pin);
+
+  proc_fops.owner = THIS_MODULE;
+  proc_fops.open = proc_open;
+  proc_fops.release = proc_release;
+  proc_fops.read = proc_read;
+  proc_fops.write = proc_write;
+  proc_fops.unlocked_ioctl = proc_ioctl;
+
+  proc_file = proc_create("zsrmv", 0666, NULL, &proc_fops);
+
+  if (proc_file == NULL){
+    printk("ZSRM.init(): could not create proc file\n");
+    remove_proc_entry("zsrmv",NULL);
+  }
   
   // initialize scheduling top
   top = -1;
@@ -4227,66 +4390,6 @@ static int __init zsrm_init(void)
   return 0;
 }
 
-void print_overhead_stats(void)
-{
-  unsigned long long avg_context_switch_ns=0L;
-  unsigned long long avg_enforcement_ns=0L;
-  unsigned long long avg_zs_enforcement_ns=0L;
-  unsigned long long avg_arrival_ns=0L;
-  unsigned long long avg_blocked_arrival_ns=0L;
-  unsigned long long avg_departure_ns = 0L;
-
-  if (num_context_switches >0){
-    avg_context_switch_ns = DIV(cumm_context_switch_ticks,num_context_switches);
-    /* avg_context_switch_ns = cumm_context_switch_ticks / num_context_switches; */
-    avg_context_switch_ns = ticks2ns(avg_context_switch_ns);
-  }
-
-  if (num_enforcements>0){
-    avg_enforcement_ns = DIV(cumm_enforcement_ticks,num_enforcements);
-    /* avg_enforcement_ns = cumm_enforcement_ticks / num_enforcements; */
-    avg_enforcement_ns = ticks2ns(avg_enforcement_ns);
-  }
-
-  if (num_zs_enforcements>0){
-    avg_zs_enforcement_ns = DIV(cumm_zs_enforcement_ticks,num_zs_enforcements);
-    /* avg_zs_enforcement_ns = cumm_zs_enforcement_ticks / num_zs_enforcements; */
-    avg_zs_enforcement_ns = ticks2ns(avg_zs_enforcement_ns);
-  }
-
-  if (num_arrivals >0){
-    avg_arrival_ns = DIV(cumm_arrival_ticks,num_arrivals);
-    /* avg_arrival_ns = cumm_arrival_ticks / num_arrivals; */
-    avg_arrival_ns = ticks2ns(avg_arrival_ns);
-  }
-
-  if (num_blocked_arrivals>0){
-    avg_blocked_arrival_ns = DIV(cumm_blocked_arrival_ticks,num_blocked_arrivals);
-    /* avg_blocked_arrival_ns = cumm_blocked_arrival_ticks / num_blocked_arrivals; */
-    avg_blocked_arrival_ns = ticks2ns(avg_blocked_arrival_ns);
-  }
-
-  if (num_departures >0){
-    avg_departure_ns = DIV(cumm_departure_ticks,num_departures);
-    /* avg_departure_ns = cumm_departure_ticks / num_departures; */
-    avg_departure_ns = ticks2ns(avg_departure_ns);
-  }
-
-  printk("zsrmv *** OVERHEAD STATS *** \n");
-  printk("avg context switch ns: %llu \t num context switch %llu \n",
-	 avg_context_switch_ns, num_context_switches);
-  printk("avg enforcement ns: %llu num enforcements: %llu \n",
-	 avg_enforcement_ns, num_enforcements);
-  printk("avg zs enforcement ns: %llu num zs enforcements: %llu \n",
-	 avg_zs_enforcement_ns, num_zs_enforcements);
-  printk("avg arrival ns: %llu num arrivals: %llu \n",
-	 avg_arrival_ns, num_arrivals);
-  printk("avg blocked arrival ns: %llu num blocked arrivals: %llu\n",
-	 avg_blocked_arrival_ns, num_blocked_arrivals);
-  printk("avg departure ns: %llu num departures: %llu\n",
-	 avg_departure_ns, num_departures);
-  printk("zsrmv *** END OVERHEAD STATS *** \n");  
-}
 
 static void __exit zsrm_exit(void)
 {
@@ -4301,6 +4404,9 @@ static void __exit zsrm_exit(void)
   kthread_stop(serial_recv_task);
 #endif
 
+  
+  sending_task_active=0;
+  wake_up_interruptible(&serial_write_wait_queue);
   kthread_stop(serial_sender_task);
 
   
@@ -4324,7 +4430,10 @@ static void __exit zsrm_exit(void)
   gpio_free(cts_gpio_pin);
   gpio_free(GPIO_RTS);
 #endif
-  
+
+  if (proc_file != NULL){
+    proc_remove(proc_file);
+  }
 }
 
 module_init(zsrm_init);
