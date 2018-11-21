@@ -337,6 +337,7 @@ int zsrmcall=-1;
 #define MIN_PRIORITY 50
 
 #define DAEMON_PRIORITY (MIN_PRIORITY + 40)
+#define RECEIVER_PRIORITY (DAEMON_PRIORITY +1)
 
 struct task_struct *sched_task;
 struct task_struct *active_task;
@@ -344,6 +345,15 @@ struct task_struct *serial_recv_task;
 struct task_struct *serial_sender_task;
 
 u32 serial_debug_flags=0;
+int serial_receiving_error_count=0;
+int serial_debug_last_non_zero_receive_count=0;
+unsigned long long  serial_debug_num_zero_receive_counts=0L;
+int serial_debug_last_receive_count=0;
+int serial_debug_largest_read_count=0;
+unsigned long long serial_debug_max_sleep_ticks=0L;
+unsigned long long serial_debug_before_sleep_timestamp_ticks=0L;
+unsigned long long serial_debug_after_sleep_timestamp_ticks=0L;
+unsigned long long serial_debug_sleep_elapsed_interval_ticks=0L;
 
 #define SERIAL_FLAG_RCV_READ_BLOCKED 1
 #define SERIAL_FLAG_SND_READ_BLOCKED 2
@@ -832,7 +842,7 @@ int arm_relative_timer(struct zs_timer *timer)
   timer->stac_expiration_ns = timer->absolute_expiration_ns;
   timer->stac_handler = timer->kernel_timer.function;
 #endif  
-
+  
   return 0;
 }
 
@@ -2780,6 +2790,8 @@ struct task_struct *gettask(int pid,  struct pid_namespace *task_namespace){
   return tsk;
 }
 
+
+
 struct zs_timer *kernel_timer2zs_timer(struct hrtimer *tmr){
   char *ztmrp = (char *) tmr;
   ztmrp = ztmrp - (((char*) &(((struct zs_timer *)ztmrp)->kernel_timer))-ztmrp);
@@ -3450,6 +3462,32 @@ int serial_receiving_buffer_read(u8 *buffer, int len)
   return read;
 }
 
+struct hrtimer serial_receiver_kernel_timer;
+
+unsigned long long serial_timer_prev_timestamp_ticks=0L;
+unsigned long long serial_timer_largest_elapsed_ticks=0L;
+unsigned long long serial_timer_period_ns;
+
+enum hrtimer_restart serial_kernel_timer_handler(struct hrtimer *ktimer){
+  ktime_t ktime;
+
+  /* unsigned long long timestamp_ticks; */
+  /* unsigned long long elapsed_ticks; */
+  /* timestamp_ticks = get_now_ticks(); */
+
+  /* elapsed_ticks = timestamp_ticks - serial_timer_prev_timestamp_ticks; */
+
+  /* if (serial_timer_largest_elapsed_ticks < elapsed_ticks){ */
+  /*   serial_timer_largest_elapsed_ticks = elapsed_ticks; */
+  /* } */
+  
+  wake_up_process(serial_recv_task);
+  set_tsk_need_resched(serial_recv_task);
+
+  ktime = ns_to_ktime(serial_timer_period_ns);
+  hrtimer_forward_now(ktimer, ktime);
+  return HRTIMER_RESTART;
+}
 
 static void serial_receiver_task(void *a)
 {
@@ -3466,28 +3504,53 @@ static void serial_receiver_task(void *a)
   
   while (!kthread_should_stop()) {
     len_read=0;
-    //do {
 #ifdef __SERIAL_HARDWARE_CONTROL_FLOW__      
     serial_stop_transmission();
     SERIAL_DEBUG_FLAG_ON(SERIAL_FLAG_HWR_SND_BLOCKED);
 #endif
-    if(mavlinkserhb_recv(&buffer, sizeof(buffer), &len_read, &readbufferexhausted)){
-      if (len_read >0){
-	serial_receiving_buffer_write(buffer,len_read);
-	//printk("ZSRM.serial_receiver_task(): finished reading %d bytes\n",len_read);
-      }
-    } else {
+    do {
+      readbufferexhausted=false;
+      if(mavlinkserhb_recv(&buffer, sizeof(buffer), &len_read, &readbufferexhausted)){
+	if (len_read >0){
+	  serial_receiving_buffer_write(buffer,len_read);
+	} else {
+	  //readbufferexhausted=true;
+	}
+      } else {
 	readbufferexhausted=true;
-	//printk("ZSRM.serial_receiver_task(): ERROR in mavlinkserhb_recv()\n");
-    }
-    //} while(!readbufferexhausted);
-    readbufferexhausted=false;
-    //printk("ZSRM.serial_receiver_task(): finished reading %d bytes\n",len_read);
+	printk("ZSRM.serial_receiver_task(): ERROR in mavlinkserhb_recv()\n");
+	serial_receiving_error_count++;
+      }
+      serial_debug_last_receive_count = len_read;
+      if (serial_debug_largest_read_count < len_read){
+	serial_debug_largest_read_count = len_read;
+      }
+      if (len_read != 0){
+	serial_debug_last_non_zero_receive_count = len_read;
+	serial_debug_num_zero_receive_counts=0L;
+      } else {
+	serial_debug_num_zero_receive_counts++;
+      }
+    } while(!readbufferexhausted || kthread_should_stop());
 #ifdef __SERIAL_HARDWARE_CONTROL_FLOW__      
     serial_resume_transmission();
     SERIAL_DEBUG_FLAG_OFF(SERIAL_FLAG_HWR_SND_BLOCKED);
 #endif
-    usleep_range(290,300);
+    serial_debug_before_sleep_timestamp_ticks = get_now_ticks();
+
+    if (!kthread_should_stop()){
+      usleep_range(290,300);
+    }
+    
+    /* set_current_state(TASK_INTERRUPTIBLE); */
+    /* schedule(); */
+
+    
+    serial_debug_after_sleep_timestamp_ticks = get_now_ticks();
+    serial_debug_sleep_elapsed_interval_ticks = (serial_debug_after_sleep_timestamp_ticks - serial_debug_before_sleep_timestamp_ticks);
+    if(serial_debug_max_sleep_ticks < serial_debug_sleep_elapsed_interval_ticks){
+      serial_debug_max_sleep_ticks = serial_debug_sleep_elapsed_interval_ticks;
+    }
   }
   
   printk("ZSRMV.serial_receiver_task() EXITING\n");
@@ -3580,12 +3643,12 @@ static void serial_sending_task(void *a){
   int ret;
   
   while(!kthread_should_stop()){
-    while(sending_task_active){
+    while(sending_task_active && !kthread_should_stop()){
       sending_index=0;
       if ((read = serial_sending_buffer_read(buffer, 100)) > 0){
-	while(sending_index < read){
+	while(sending_index < read && !kthread_should_stop()){
 	  batch_size = (read-sending_index > 8 ) ? 8 : (read-sending_index);
-	  while(serial_is_reception_stopped()){
+	  while(serial_is_reception_stopped() && !kthread_should_stop()){
 	    usleep_range(590,600);
 	  }
 	  ret = mavlinkserhb_send(&buffer[sending_index],batch_size);
@@ -3633,7 +3696,7 @@ int send(int rid, void *buffer, int buf_len, int finished)
   if (finished){
     if (kernel_entry_timestamp_ticks <= reserve_table[rid].current_job_deadline_ticks){
       //ret = mavlinkserhb_send(buffer,buf_len);
-      ret = (serial_sending_buffer_write(buffer, buf_len)>0) ?1 : 0;
+      ret = (serial_sending_buffer_write(buffer, buf_len)==buf_len) ?1 : 0;
       wait_for_next_period(rid,
 			   0,
 			   1 // disableHypertask -- normal actuation sent on time
@@ -3648,7 +3711,7 @@ int send(int rid, void *buffer, int buf_len, int finished)
     }
   } else {
     //ret = mavlinkserhb_send(buffer,buf_len);
-    ret = (serial_sending_buffer_write(buffer,buf_len) >0) ? 1: 0;
+    ret = (serial_sending_buffer_write(buffer,buf_len) == buf_len) ? 1: 0;
   }
   
   return ret;
@@ -4161,13 +4224,23 @@ static ssize_t proc_read(struct file *filp,	/* see include/linux/fs.h   */
     static int eof=0;
 
     if (!eof){
-      len = sprintf(buffer,"Receiver:%s Sender:%s HWR RCV:%s HWR SND: %s Recv buffer: %s Trans buffer: %s\n",
-		    ((serial_debug_flags & SERIAL_FLAG_RCV_READ_BLOCKED)? "BLOCKED" : "RUNNING"),
-		    ((serial_debug_flags & SERIAL_FLAG_SND_READ_BLOCKED)? "BLOCKED" : "RUNNING"),
-		    ((serial_is_reception_stopped())? "STOPPED" : "FREE"),
-		    ((serial_debug_flags & SERIAL_FLAG_HWR_SND_BLOCKED)? "STOPPED" : "FREE"),
-		    ((serial_receiving_writing_index == serial_receiving_reading_index)? "EMPTY" : "DATA"),
-		    ((serial_sending_writing_index == serial_sending_reading_index)? "EMPTY" : "DATA")		    
+      len = snprintf(buffer,length,"Receiver:%s \nSender:%s \nHWR RCV:%s \nHWR SND: %s \nRecv buffer: %s readIdx(%d) writeIdx(%d)\nTrans buffer: %s readIdx(%d) writeIdx(%d)\n#errors: %d\nLast Non-Zero Receive Count: %d\nNum Zero-Receives count:%lld\nLast receive count:%d\nLargest read count: %d\nMax sleep:%lld\n",
+		     ((serial_debug_flags & SERIAL_FLAG_RCV_READ_BLOCKED)? "BLOCKED" : "RUNNING"),
+		     ((serial_debug_flags & SERIAL_FLAG_SND_READ_BLOCKED)? "BLOCKED" : "RUNNING"),
+		     ((serial_is_reception_stopped())? "STOPPED" : "FREE"),
+		     ((serial_debug_flags & SERIAL_FLAG_HWR_SND_BLOCKED)? "STOPPED" : "FREE"),
+		     ((serial_receiving_writing_index == serial_receiving_reading_index)? "EMPTY" : "DATA"),
+		     serial_receiving_reading_index,
+		     serial_receiving_writing_index,
+		     ((serial_sending_writing_index == serial_sending_reading_index)? "EMPTY" : "DATA"),
+		     serial_sending_reading_index,
+		     serial_sending_writing_index,
+		     serial_receiving_error_count,
+		     serial_debug_last_non_zero_receive_count,
+		     serial_debug_num_zero_receive_counts,
+		     serial_debug_last_receive_count,
+		     serial_debug_largest_read_count,
+		     ticks2ns1(serial_debug_max_sleep_ticks)
 		    );
     } else {
       // send eof
@@ -4201,6 +4274,8 @@ static int __init zsrm_init(void)
 
   unsigned long long start_ns;
   unsigned long long end_ns;
+
+  ktime_t ktime;
 
   /* u64 start_tick; */
   /* u64 end_tick; */
@@ -4334,7 +4409,7 @@ static int __init zsrm_init(void)
 
   printk("ZSRMV: created serial receiver task ptr=%x\n",serial_recv_task);
   
-  p.sched_priority = DAEMON_PRIORITY;
+  p.sched_priority = RECEIVER_PRIORITY;
   
   if (sched_setscheduler(serial_recv_task, SCHED_FIFO, &p)<0){
     printk("ZSRMMV.init() error setting serial_receiver_task kernel thead priority\n");
@@ -4344,6 +4419,13 @@ static int __init zsrm_init(void)
 
   if (serial_recv_task){
     wake_up_process(serial_recv_task);
+    serial_timer_prev_timestamp_ticks = get_now_ticks();
+
+    /* hrtimer_init(&serial_receiver_kernel_timer, CLOCK_MONOTONIC, HRTIMER_MODE_REL); */
+    /* serial_receiver_kernel_timer.function = serial_kernel_timer_handler; */
+    /* serial_timer_period_ns = 300000; */
+    /* ktime = ns_to_ktime(serial_timer_period_ns); */
+    /* hrtimer_start(&serial_receiver_kernel_timer, ktime , HRTIMER_MODE_REL); */
   }
 #endif 
 
@@ -4401,12 +4483,16 @@ static void __exit zsrm_exit(void)
   kthread_stop(active_task);
 
 #ifdef  __START_SERIAL_RECEIVER_TASK__
+  wake_up_process(serial_recv_task);
   kthread_stop(serial_recv_task);
+
+  //hrtimer_cancel(&serial_receiver_kernel_timer);
 #endif
 
   
   sending_task_active=0;
   wake_up_interruptible(&serial_write_wait_queue);
+  wake_up_process(serial_sender_task);
   kthread_stop(serial_sender_task);
 
   
