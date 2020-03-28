@@ -44,22 +44,29 @@
 
 #include "mavlinkserhb.h"
 
-// using the one defined in the hypmtscheduler library
-extern void __hvc(u32 uhcall_function, void *uhcall_buffer, u32 uhcall_buffer_len);
 
-/* void __hvc(u32 uhcall_function, void *uhcall_buffer, */
-/* 		u32 uhcall_buffer_len){ */
+/*
+ * Dio: commenting this out to avoid the redefinition 
+ * from hypmtscheduler_kmodlib.c
+ */
+#if 0
+void __hvc(u32 uhcall_function, void *uhcall_buffer,
+		u32 uhcall_buffer_len){
 
-/* 	asm volatile */
-/* 		(	" mov r0, %[in_0]\r\n" */
-/* 			" mov r1, %[in_1]\r\n" */
-/* 			" mov r2, %[in_2]\r\n" */
-/* 			".long 0xE1400071 \r\n" */
-/* 				: // outputs */
-/* 				: [in_0] "r" (uhcall_function), [in_1] "r" (uhcall_buffer), [in_2] "r" (uhcall_buffer_len)  // inouts */
-/* 	           : "r0", "r1", "r2" //clobber */
-/* 	    ); */
-/* } */
+	asm volatile
+		(	" mov r0, %[in_0]\r\n"
+			" mov r1, %[in_1]\r\n"
+			" mov r2, %[in_2]\r\n"
+			".long 0xE1400071 \r\n"
+				: // outputs
+				: [in_0] "r" (uhcall_function), [in_1] "r" (uhcall_buffer), [in_2] "r" (uhcall_buffer_len)  // inouts
+	           : "r0", "r1", "r2" //clobber
+	    );
+}
+#else
+extern void __hvc(u32 uhcall_function, void *uhcall_buffer,
+		  u32 uhcall_buffer_len);
+#endif
 
 
 void mavlinkserhb_initialize(u32 baudrate){

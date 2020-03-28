@@ -65,6 +65,7 @@ extern  void __hvc(u32 uhcall_function, void *uhcall_buffer, u32 uhcall_buffer_l
 extern bool hypmtscheduler_createhyptask(u32 first_period, u32 regular_period,
 			u32 priority, u32 hyptask_id, u32 *hyptask_handle);
 extern bool hypmtscheduler_disablehyptask(u32 hyptask_handle);
+extern bool hypmtscheduler_guestjobstart(u32 hyptask_handle);
 extern bool hypmtscheduler_deletehyptask(u32 hyptask_handle);
 extern u64 sysreg_read_cntpct(void);
 extern bool hypmtscheduler_getrawtick64(u64 *tickcount);
@@ -132,15 +133,23 @@ unsigned long long stac_now = 0;
  * Variables to measure overhead
  */
 
+unsigned long long hypercall_start_timestamp_ticks=0L;
+unsigned long long hypercall_end_timestamp_ticks=0L;
+unsigned long long cumm_hypercall_ticks=0L;
+unsigned long long num_hypercalls = 0L;
+unsigned long long wc_hypercall_ticks = 0L;
+
 unsigned long long context_switch_start_timestamp_ticks=0L;
 unsigned long long context_switch_end_timestamp_ticks=0L;
 unsigned long long cumm_context_switch_ticks=0L;
 unsigned long long num_context_switches = 0L;
+unsigned long long wc_context_switch_ticks=0L;
 
 unsigned long long enforcement_start_timestamp_ticks=0L;
 unsigned long long enforcement_end_timestamp_ticks=0L;
 unsigned long long cumm_enforcement_ticks = 0L;
 unsigned long long num_enforcements = 0L;
+unsigned long long wc_enforcement_ticks=0L;
 
 unsigned long long zs_enforcement_start_timestamp_ticks=0L;
 unsigned long long zs_enforcement_end_timestamp_ticks=0L;
@@ -151,6 +160,7 @@ unsigned long long arrival_start_timestamp_ticks=0L;
 unsigned long long arrival_end_timestamp_ticks=0L;
 unsigned long long cumm_arrival_ticks = 0L;
 unsigned long long num_arrivals = 0L;
+unsigned long long wc_arrival_ticks = 0L;
 
 unsigned long long cumm_blocked_arrival_ticks=0L;
 unsigned long long num_blocked_arrivals=0L;
@@ -159,6 +169,7 @@ unsigned long long departure_start_timestamp_ticks=0L;
 unsigned long long departure_end_timestamp_ticks=0L;
 unsigned long long cumm_departure_ticks=0L;
 unsigned long long num_departures = 0L;
+unsigned long long wc_departure_ticks=0L;
 
 u64 start_tick;
 u64 end_tick;
@@ -1271,7 +1282,7 @@ unsigned long long calculate_start_time(int rid){
   unsigned long long now_ticks=0L;
 
   now_ticks = get_now_ticks();
-  
+
   if(!hypmtscheduler_dumpdebuglog(&debug_log, &debug_log_buffer_index)){
     printk(KERN_INFO "ZSRMV.budget_enforcement(): dumpdebuglog hypercall API failed\n");
   } else {
@@ -1362,15 +1373,21 @@ void budget_enforcement(int rid, int request_stop)
   // double check if we were preempted by a hypertask.
   // If so, adjust the CPU consumption and reprogram the timer
 
+  hypercall_start_timestamp_ticks = enforcement_start_timestamp_ticks;
   if(!hypmtscheduler_dumpdebuglog(&debug_log, &debug_log_buffer_index)){
     printk(KERN_INFO "ZSRMV.budget_enforcement(): dumpdebuglog hypercall API failed\n");
   } else {
-
+    hypercall_end_timestamp_ticks = get_now_ticks();
+    cumm_hypercall_ticks += hypercall_end_timestamp_ticks - hypercall_start_timestamp_ticks;
+    if (wc_hypercall_ticks < (hypercall_end_timestamp_ticks - hypercall_start_timestamp_ticks)){
+      wc_hypercall_ticks = (hypercall_end_timestamp_ticks - hypercall_start_timestamp_ticks);
+    }
+    num_hypercalls ++;
     //printk(KERN_INFO "ZSRMV.budget_enforcement(): dumpdebuglog: total entries=%u\n", debug_log_buffer_index);
     for (i = 0; i< debug_log_buffer_index; i++){
       add_trace_record(debug_log[i].hyptask_id, debug_log[i].timestamp, debug_log[i].event_type);
     }
-
+    
     // build a preemption intersection after we add the trace
     hypertask_preemption_time_ticks = calculate_hypertask_preemption_time_ticks(rid, kernel_entry_timestamp_ticks);
 
@@ -1491,6 +1508,12 @@ void start_of_period(int rid)
   if (reserve_table[rid].job_completed){
     reserve_table[rid].current_job_deadline_ticks = kernel_entry_timestamp_ticks +
       reserve_table[rid].hyp_enforcer_instant_ticks;
+
+    // if the previous job completed successfuly then we should inform the hypervisor of
+    // a new guest job really starting (as just continuing an old job)
+    if (!hypmtscheduler_guestjobstart(reserve_table[rid].hyptask_handle)) {
+	printk("ZSRMV.start_of_period(): hypmtscheduler_guestjobstart() FAILED\n");
+      }
   }
   reserve_table[rid].job_completed = 0;
   
@@ -1612,10 +1635,16 @@ void start_of_period(int rid)
     cumm_context_switch_ticks += context_switch_end_timestamp_ticks -
       context_switch_start_timestamp_ticks;
     num_context_switches ++;
+    if (wc_context_switch_ticks < (context_switch_end_timestamp_ticks -context_switch_start_timestamp_ticks)){
+      wc_context_switch_ticks = (context_switch_end_timestamp_ticks -context_switch_start_timestamp_ticks);
+    }
   } else {
     // arrivals without context switch 
     cumm_arrival_ticks += arrival_end_timestamp_ticks - arrival_start_timestamp_ticks;
     num_arrivals++;
+    if (wc_arrival_ticks < (arrival_end_timestamp_ticks - arrival_start_timestamp_ticks)){
+      wc_arrival_ticks = (arrival_end_timestamp_ticks - arrival_start_timestamp_ticks);
+    }
   }
   arrival_end_timestamp_ticks = arrival_start_timestamp_ticks = 0L;
   context_switch_end_timestamp_ticks = context_switch_start_timestamp_ticks=0L;
@@ -2425,6 +2454,9 @@ int wait_for_next_period(int rid, int nowait, int disableHypertask)
   departure_end_timestamp_ticks = get_now_ticks();
   cumm_departure_ticks += departure_end_timestamp_ticks - departure_start_timestamp_ticks;
   num_departures++;
+  if (wc_departure_ticks < (departure_end_timestamp_ticks - departure_start_timestamp_ticks)){
+    wc_departure_ticks = (departure_end_timestamp_ticks - departure_start_timestamp_ticks);
+  }
   departure_end_timestamp_ticks = departure_start_timestamp_ticks = 0L;
 
   // Only go to sleep if I have not received an unprocessed wakeup from
@@ -2535,6 +2567,9 @@ int end_of_period(int rid)
   departure_end_timestamp_ticks = get_now_ticks();
   cumm_departure_ticks += departure_end_timestamp_ticks - departure_start_timestamp_ticks;
   num_departures++;
+  if (wc_departure_ticks < (departure_end_timestamp_ticks - departure_start_timestamp_ticks)){
+    wc_departure_ticks = (departure_end_timestamp_ticks - departure_start_timestamp_ticks);
+  }
   departure_end_timestamp_ticks = departure_start_timestamp_ticks = 0L;
 
   // This is not a real wakeup yet... this will be registered in the
@@ -2957,6 +2992,9 @@ static void scheduler_task(void *a){
       cumm_enforcement_ticks += enforcement_end_timestamp_ticks -
 	enforcement_start_timestamp_ticks;
       num_enforcements++;
+      if (wc_enforcement_ticks < (enforcement_end_timestamp_ticks - enforcement_start_timestamp_ticks)){
+	wc_enforcement_ticks = (enforcement_end_timestamp_ticks - enforcement_start_timestamp_ticks);
+      }
       enforcement_end_timestamp_ticks = enforcement_start_timestamp_ticks=0L;
     }
 
@@ -3095,8 +3133,12 @@ static void activator_task(void *a)
 					   &(reserve_table[rid].hyptask_handle))){
 	    printk(KERN_INFO "ZSRMV.activator_task(): hypmtschedulerkmod: create_hyptask failed\n");
 	  } else {
-	    reserve_table[rid].hypertask_active=1;
-	    printk("ZSRMV.activator_task(): hyptscheduler_createhyptask() SUCCESSFUL\n");
+	    if (!hypmtscheduler_guestjobstart(reserve_table[rid].hyptask_handle)) {
+		printk("ZSRMV.activator_task(): hypmtscheduler_guestjobstart() FAILED\n");
+	    } else {
+	      reserve_table[rid].hypertask_active=1;
+	      printk("ZSRMV.activator_task(): hyptscheduler_createhyptask() SUCCESSFUL\n");
+	    }
 	  }
 	}
 #else
@@ -4147,56 +4189,63 @@ void print_overhead_stats(void)
   unsigned long long avg_arrival_ns=0L;
   unsigned long long avg_blocked_arrival_ns=0L;
   unsigned long long avg_departure_ns = 0L;
+  unsigned long long avg_hypercall_ns = 0L;
 
+  if (num_hypercalls >0){
+    avg_hypercall_ns = DIV(cumm_hypercall_ticks, num_hypercalls);
+    avg_hypercall_ns = ticks2ns1(avg_hypercall_ns);
+  }
   if (num_context_switches >0){
     avg_context_switch_ns = DIV(cumm_context_switch_ticks,num_context_switches);
     /* avg_context_switch_ns = cumm_context_switch_ticks / num_context_switches; */
-    avg_context_switch_ns = ticks2ns(avg_context_switch_ns);
+    avg_context_switch_ns = ticks2ns1(avg_context_switch_ns);
   }
 
   if (num_enforcements>0){
     avg_enforcement_ns = DIV(cumm_enforcement_ticks,num_enforcements);
     /* avg_enforcement_ns = cumm_enforcement_ticks / num_enforcements; */
-    avg_enforcement_ns = ticks2ns(avg_enforcement_ns);
+    avg_enforcement_ns = ticks2ns1(avg_enforcement_ns);
   }
 
   if (num_zs_enforcements>0){
     avg_zs_enforcement_ns = DIV(cumm_zs_enforcement_ticks,num_zs_enforcements);
     /* avg_zs_enforcement_ns = cumm_zs_enforcement_ticks / num_zs_enforcements; */
-    avg_zs_enforcement_ns = ticks2ns(avg_zs_enforcement_ns);
+    avg_zs_enforcement_ns = ticks2ns1(avg_zs_enforcement_ns);
   }
 
   if (num_arrivals >0){
     avg_arrival_ns = DIV(cumm_arrival_ticks,num_arrivals);
     /* avg_arrival_ns = cumm_arrival_ticks / num_arrivals; */
-    avg_arrival_ns = ticks2ns(avg_arrival_ns);
+    avg_arrival_ns = ticks2ns1(avg_arrival_ns);
   }
 
   if (num_blocked_arrivals>0){
     avg_blocked_arrival_ns = DIV(cumm_blocked_arrival_ticks,num_blocked_arrivals);
     /* avg_blocked_arrival_ns = cumm_blocked_arrival_ticks / num_blocked_arrivals; */
-    avg_blocked_arrival_ns = ticks2ns(avg_blocked_arrival_ns);
+    avg_blocked_arrival_ns = ticks2ns1(avg_blocked_arrival_ns);
   }
 
   if (num_departures >0){
     avg_departure_ns = DIV(cumm_departure_ticks,num_departures);
     /* avg_departure_ns = cumm_departure_ticks / num_departures; */
-    avg_departure_ns = ticks2ns(avg_departure_ns);
+    avg_departure_ns = ticks2ns1(avg_departure_ns);
   }
 
   printk("zsrmv *** OVERHEAD STATS *** \n");
-  printk("avg context switch ns: %llu \t num context switch %llu \n",
-	 avg_context_switch_ns, num_context_switches);
-  printk("avg enforcement ns: %llu num enforcements: %llu \n",
-	 avg_enforcement_ns, num_enforcements);
+  printk("avg hypercall ns: %llu \t wc hypercall ns: %llu \t num hypercalls: %llu \n",
+	 avg_hypercall_ns, ticks2ns1(wc_hypercall_ticks), num_hypercalls);
+  printk("avg context switch ns: %llu \t wc context switch ns: %llu \t num context switch %llu \n",
+	 avg_context_switch_ns, ticks2ns1(wc_context_switch_ticks), num_context_switches);
+  printk("avg enforcement ns: %llu \t wc enforcement ns: %llu \t num enforcements: %llu \n",
+	 avg_enforcement_ns, ticks2ns1(wc_enforcement_ticks), num_enforcements);
   printk("avg zs enforcement ns: %llu num zs enforcements: %llu \n",
 	 avg_zs_enforcement_ns, num_zs_enforcements);
-  printk("avg arrival ns: %llu num arrivals: %llu \n",
-	 avg_arrival_ns, num_arrivals);
+  printk("avg arrival ns: %llu \t wc arrival ns: %llu \t num arrivals: %llu \n",
+	 avg_arrival_ns, ticks2ns1(wc_arrival_ticks), num_arrivals);
   printk("avg blocked arrival ns: %llu num blocked arrivals: %llu\n",
 	 avg_blocked_arrival_ns, num_blocked_arrivals);
-  printk("avg departure ns: %llu num departures: %llu\n",
-	 avg_departure_ns, num_departures);
+  printk("avg departure ns: %llu \t wc departure ns: %llu \t num departures: %llu\n",
+	 avg_departure_ns, ticks2ns1(wc_departure_ticks), num_departures);
   printk("zsrmv *** END OVERHEAD STATS *** \n");  
 }
 
