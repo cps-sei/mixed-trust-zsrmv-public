@@ -127,6 +127,7 @@ struct reserve {
   unsigned long long period_ticks;
   struct timespec execution_time;
   struct timespec nominal_execution_time;
+  int has_zsenforcement;
   int hypertask_active;
   int has_hyptask;
   uint32_t hyptask_handle; // u32

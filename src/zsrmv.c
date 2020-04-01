@@ -3,12 +3,12 @@ Copyright (c) 2014 Carnegie Mellon University.
 
 All Rights Reserved.
 
-Redistribution and use in source and binary forms, with or without modification, are permitted provided that the 
+Redistribution and use in source and binary forms, with or without modification, are permitted provided that the
 following conditions are met:
 
-1. Redistributions of source code must retain the above copyright notice, this list of conditions and the following 
+1. Redistributions of source code must retain the above copyright notice, this list of conditions and the following
 acknowledgments and disclaimers.
-2. Redistributions in binary form must reproduce the above copyright notice, this list of conditions and the following 
+2. Redistributions in binary form must reproduce the above copyright notice, this list of conditions and the following
 acknowledgments and disclaimers in the documentation and/or other materials provided with the distribution.
 3. Products derived from this software may not include â€œCarnegie Mellon University,â€� "SEIâ€� and/or â€œSoftware
 Engineering Institute" in the name of such derived product, nor shall â€œCarnegie Mellon University,â€� "SEIâ€� and/or
@@ -18,19 +18,19 @@ written permission. For written permission, please contact permission@sei.cmu.ed
 ACKNOWLEDMENTS AND DISCLAIMERS:
 Copyright 2014 Carnegie Mellon University
 This material is based upon work funded and supported by the Department of Defense under Contract No. FA8721-
-05-C-0003 with Carnegie Mellon University for the operation of the Software Engineering Institute, a federally 
+05-C-0003 with Carnegie Mellon University for the operation of the Software Engineering Institute, a federally
 funded research and development center.
 
-Any opinions, findings and conclusions or recommendations expressed in this material are those of the author(s) and 
+Any opinions, findings and conclusions or recommendations expressed in this material are those of the author(s) and
 do not necessarily reflect the views of the United States Department of Defense.
 
-NO WARRANTY. 
-THIS CARNEGIE MELLON UNIVERSITY AND SOFTWARE ENGINEERING INSTITUTE 
+NO WARRANTY.
+THIS CARNEGIE MELLON UNIVERSITY AND SOFTWARE ENGINEERING INSTITUTE
 MATERIAL IS FURNISHED ON AN â€œAS-ISâ€� BASIS. CARNEGIE MELLON UNIVERSITY MAKES NO
-WARRANTIES OF ANY KIND, EITHER EXPRESSED OR IMPLIED, AS TO ANY MATTER INCLUDING, 
-BUT NOT LIMITED TO, WARRANTY OF FITNESS FOR PURPOSE OR MERCHANTABILITY, 
-EXCLUSIVITY, OR RESULTS OBTAINED FROM USE OF THE MATERIAL. CARNEGIE MELLON 
-UNIVERSITY DOES NOT MAKE ANY WARRANTY OF ANY KIND WITH RESPECT TO FREEDOM FROM 
+WARRANTIES OF ANY KIND, EITHER EXPRESSED OR IMPLIED, AS TO ANY MATTER INCLUDING,
+BUT NOT LIMITED TO, WARRANTY OF FITNESS FOR PURPOSE OR MERCHANTABILITY,
+EXCLUSIVITY, OR RESULTS OBTAINED FROM USE OF THE MATERIAL. CARNEGIE MELLON
+UNIVERSITY DOES NOT MAKE ANY WARRANTY OF ANY KIND WITH RESPECT TO FREEDOM FROM
 PATENT, TRADEMARK, OR COPYRIGHT INFRINGEMENT.
 
 This material has been approved for public release and unlimited distribution.
@@ -124,6 +124,10 @@ void serial_resume_transmission(void){
 int serial_is_reception_stopped(void){
   return gpio_get_value(cts_gpio_pin);
 }
+
+// forward declarations
+void create_hypertask(int rid);
+
 
 //-- ghost variable: the current time
 unsigned long long stac_now = 0;
@@ -255,7 +259,7 @@ u64 rdtsc64(void){
 	  (	//" dsb\r\n" // data synchronization barrier *** testing to see if we need this
 		//" isb\r\n" // instruction synchronization barrier
 		// Syntax: MRRC <coproc>=coprocessor, <#opcode3>=coproc opcode, Rt, Rt2, CRm=coproc reg
-		" mrrc p15, 0, r0, r1, c9 \r\n" // read 64 bits tsc 
+		" mrrc p15, 0, r0, r1, c9 \r\n" // read 64 bits tsc
 		" mov %0, r0 \r\n"
 		" mov %1, r1 \r\n"
 		: "=r" (tsc_lo), "=r" (tsc_hi) // outputs
@@ -445,7 +449,7 @@ int wait_for_next_release(int rid);
 /*@predicate elemNull(struct reserve *p) = (p == \null) || elem(p);*/
 /*@predicate disc(struct reserve *p) = \forall int i; 0 <= i < maxReserves ==> reserve_table[i].next != p;*/
 
-/*@predicate elemt(struct zs_timer *p) = \exists int i; (0 <= i < maxReserves && 
+/*@predicate elemt(struct zs_timer *p) = \exists int i; (0 <= i < maxReserves &&
   (p == &(reserve_table[i].period_timer) || p == &(reserve_table[i].enforcement_timer)));*/
 /*@predicate elemtNull(struct zs_timer *p) = (p == \null) || elemt(p);*/
 /*@predicate disct(struct zs_timer *p) = \forall int i; 0 <= i < maxReserves ==>
@@ -455,7 +459,7 @@ int wait_for_next_release(int rid);
 /*@predicate fp11 = elemNull(readyq);*/
 /*@predicate fp12 = elemNull(rm_head);*/
 /*@predicate fp13 = \forall int i; 0 <= i < maxReserves ==>
-  reserve_table[i].rid == i;*/ 
+  reserve_table[i].rid == i;*/
 /*@predicate fp1 = fp11 && fp12 && fp13;*/
 
 /*@predicate fp21 = \forall struct reserve *p; elem(p) ==> elemNull(p->next);*/
@@ -463,9 +467,9 @@ int wait_for_next_release(int rid);
 /*@predicate fp23 = \forall struct zs_timer *p; elemt(p) ==> elemtNull(p->next);*/
 /*@predicate fp2 = fp21 && fp22 && fp23;*/
 
-/*@predicate fp31 = \forall struct reserve *p, *q; elem(p) ==> elem(q) ==> 
+/*@predicate fp31 = \forall struct reserve *p, *q; elem(p) ==> elem(q) ==>
   (p->next == q) ==> (p->priority >= q->priority);*/
-/*@predicate fp32 = \forall struct reserve *p, *q; elem(p) ==> elem(q) ==> 
+/*@predicate fp32 = \forall struct reserve *p, *q; elem(p) ==> elem(q) ==>
   (p->rm_next == q) ==> (p->period_ns <= q->period_ns);*/
 /*@predicate fp3 = fp31 && fp32;*/
 
@@ -475,7 +479,7 @@ int wait_for_next_release(int rid);
 
 //-- ZSRM invariants
 
-/*@predicate zsrm_lem11 = \forall int i; 0 <= i < maxReserves ==> 
+/*@predicate zsrm_lem11 = \forall int i; 0 <= i < maxReserves ==>
   ((readyq != &(reserve_table[i]) ==> \separated(readyq,&(reserve_table[i]))) &&
   (\forall int j; 0 <= j < maxReserves ==> reserve_table[j].next != &(reserve_table[i]) ==> \separated(reserve_table[j].next,&(reserve_table[i]))));*/
 
@@ -485,60 +489,60 @@ int wait_for_next_release(int rid);
 
 //-- real_exec_time <= current_exec_time && start_ns <= real_start_ns
 /*@predicate zsrm1 = \forall int i; 0 <= i < maxReserves ==>
-  (reserve_table[i].real_exectime_ns <= reserve_table[i].current_exectime_ns && 
+  (reserve_table[i].real_exectime_ns <= reserve_table[i].current_exectime_ns &&
   reserve_table[i].start_ns <= reserve_table[i].real_start_ns);*/
 
 //-- real_exec_time <= current_exec_time && start_ns <= real_start_ns
 /*@predicate zsrm1_stop1 = \forall int i; 0 <= i < maxReserves ==>
-  ((readyq != &(reserve_table[i]) ==> reserve_table[i].real_exectime_ns <= reserve_table[i].current_exectime_ns) && 
-  (readyq == &(reserve_table[i]) ==> reserve_table[i].real_exectime_ns <= reserve_table[i].current_exectime_ns + stac_now - readyq->real_start_ns) && 
+  ((readyq != &(reserve_table[i]) ==> reserve_table[i].real_exectime_ns <= reserve_table[i].current_exectime_ns) &&
+  (readyq == &(reserve_table[i]) ==> reserve_table[i].real_exectime_ns <= reserve_table[i].current_exectime_ns + stac_now - readyq->real_start_ns) &&
   reserve_table[i].start_ns <= reserve_table[i].real_start_ns);*///-- real_exec_time <= current_exec_time && start_ns <= real_start_ns
 
 /*@predicate zsrm1_stop2 = \forall int i; 0 <= i < maxReserves ==>
-  (reserve_table[i].real_exectime_ns <= reserve_table[i].current_exectime_ns && 
+  (reserve_table[i].real_exectime_ns <= reserve_table[i].current_exectime_ns &&
   (readyq != &(reserve_table[i]) ==> reserve_table[i].start_ns <= reserve_table[i].real_start_ns) &&
   (readyq == &(reserve_table[i]) ==> reserve_table[i].start_ns <= stac_now));*/
 
 //-- real_exec_time <= current_exec_time && start_ns <= real_start_ns
 /*@predicate zsrm1_start1 = \forall int i; 0 <= i < maxReserves ==>
-  ((readyq != &(reserve_table[i]) ==> reserve_table[i].real_exectime_ns <= reserve_table[i].current_exectime_ns) && 
-  (readyq == &(reserve_table[i]) ==> reserve_table[i].real_exectime_ns <= reserve_table[i].current_exectime_ns + stac_now - readyq->real_start_ns) && 
+  ((readyq != &(reserve_table[i]) ==> reserve_table[i].real_exectime_ns <= reserve_table[i].current_exectime_ns) &&
+  (readyq == &(reserve_table[i]) ==> reserve_table[i].real_exectime_ns <= reserve_table[i].current_exectime_ns + stac_now - readyq->real_start_ns) &&
   reserve_table[i].start_ns <= reserve_table[i].real_start_ns);*///-- real_exec_time <= current_exec_time && start_ns <= real_start_ns
 
 /*@predicate zsrm1_start2 = \forall int i; 0 <= i < maxReserves ==>
-  (reserve_table[i].real_exectime_ns <= reserve_table[i].current_exectime_ns && 
+  (reserve_table[i].real_exectime_ns <= reserve_table[i].current_exectime_ns &&
   (readyq != &(reserve_table[i]) ==> reserve_table[i].start_ns <= reserve_table[i].real_start_ns) &&
   (readyq == &(reserve_table[i]) ==> reserve_table[i].start_ns <= stac_now));*/
 
 //-- the active job must have a timer set to enforce its execution time
 /*@predicate zsrm2 = elem(readyq) ==>
   (((readyq->enforcement_timer.expiration.tv_sec * 1000000000L +
-  readyq->enforcement_timer.expiration.tv_nsec) <= 
+  readyq->enforcement_timer.expiration.tv_nsec) <=
   (readyq->exectime_ns - readyq->current_exectime_ns)) &&
   ((readyq->enforcement_timer.expiration.tv_sec * 1000000000L +
-  readyq->enforcement_timer.expiration.tv_nsec) <= 
+  readyq->enforcement_timer.expiration.tv_nsec) <=
   (readyq->exectime_ns - readyq->real_exectime_ns)));*/
 
 //-- current_exec_time <= exec_time
 /*@predicate zsrm3 = \forall int i; 0 <= i < maxReserves ==>
-  reserve_table[i].current_exectime_ns <= reserve_table[i].exectime_ns;*/ 
+  reserve_table[i].current_exectime_ns <= reserve_table[i].exectime_ns;*/
 
 //-- the active job must have a timer set to enforce its execution time
 /*@predicate zsrm4 = \forall int i; 0 <= i < maxReserves ==>
   (reserve_table[i].enforcement_timer.expiration.tv_sec * 1000000000L +
-  reserve_table[i].enforcement_timer.expiration.tv_nsec) <= 
+  reserve_table[i].enforcement_timer.expiration.tv_nsec) <=
   reserve_table[i].exectime_ns;*/
 
 //-- the active job must have a timer set to enforce its execution time
 /*@predicate zsrm5 = elem(readyq) ==>
-  ((readyq->enforcement_timer.absolute_expiration_ns <= 
+  ((readyq->enforcement_timer.absolute_expiration_ns <=
   (readyq->exectime_ns - readyq->current_exectime_ns)) &&
-  (readyq->enforcement_timer.absolute_expiration_ns <= 
+  (readyq->enforcement_timer.absolute_expiration_ns <=
   (readyq->exectime_ns - readyq->real_exectime_ns)));*/
 
 //-- the active job must have a timer set to enforce its execution time
 /*@predicate zsrm6 = elem(readyq) ==>
-  ((readyq->enforcement_timer.stac_expiration_ns <= 
+  ((readyq->enforcement_timer.stac_expiration_ns <=
   (readyq->exectime_ns - readyq->current_exectime_ns)) &&
   (readyq->enforcement_timer.stac_armed == 1) &&
   (readyq->enforcement_timer.stac_handler == kernel_timer_handler));*/
@@ -768,7 +772,7 @@ int add_trace_record(int rid, unsigned long long ts, int event_type)
 #ifdef ZSV_SIMULATE_CRASH
   char buf[100];
 #endif
-  
+
 /* #ifdef __ZS_USE_SYSTSC__ */
 /*   if (trace_index >= TRACE_BUFFER_SIZE) */
 /*     return -1; */
@@ -779,11 +783,11 @@ int add_trace_record(int rid, unsigned long long ts, int event_type)
 /*   trace_index++; */
 /*   return 0;   */
 /* #elif __ZS_USE_HYPTSC__ */
-  
+
 /*   hypmtscheduler_logtsc(event_type); */
-  
+
 /* #else */
-  
+
   if (trace_index >= TRACE_BUFFER_SIZE)
     return -1;
 
@@ -799,7 +803,7 @@ int add_trace_record(int rid, unsigned long long ts, int event_type)
     mavlinkserhb_send(buf,strlen(buf));
   }
 #endif
-  
+
   return 0;
 /* #endif */
 }
@@ -831,7 +835,7 @@ int arm_relative_timer(struct zs_timer *timer)
   ktime_t ktime;
 
   ktime = ns_to_ktime(timer->absolute_expiration_ns);
-  
+
   /* ktime = ktime_set(timer->absolute_expiration_ns / 1000000000, */
   /*                   timer->absolute_expiration_ns % 1000000000); */
 
@@ -842,7 +846,7 @@ int arm_relative_timer(struct zs_timer *timer)
 	  timer->timer_type == TIMER_ENF ? "TIMER_ENF" : timer->timer_type == TIMER_PERIOD ? "TIMER_PERIOD" : "TIMER_ZS_ENF");
 #endif
 #endif
-  
+
   /* hrtimer_init(&(timer->kernel_timer), CLOCK_MONOTONIC, HRTIMER_MODE_REL); */
   timer->kernel_timer.function= kernel_timer_handler;
   hrtimer_start(&(timer->kernel_timer), ktime, HRTIMER_MODE_REL);
@@ -852,8 +856,8 @@ int arm_relative_timer(struct zs_timer *timer)
   timer->stac_armed = 1;
   timer->stac_expiration_ns = timer->absolute_expiration_ns;
   timer->stac_handler = timer->kernel_timer.function;
-#endif  
-  
+#endif
+
   return 0;
 }
 
@@ -872,7 +876,7 @@ int arm_relative_timer(struct zs_timer *timer)
   @behavior b1:
   @assumes t == &(readyq->enforcement_timer); @ensures zsrm5 && zsrm6;
   @behavior b2:
-  @assumes \exists int i; 0 <= i < maxReserves && t == &(reserve_table[i].period_timer); 
+  @assumes \exists int i; 0 <= i < maxReserves && t == &(reserve_table[i].period_timer);
   @ensures t->stac_armed == 1 && t->stac_handler == kernel_timer_handler;
   @ensures t->stac_expiration_ns == reserve_table[t->rid].period.tv_sec * 1000000000L + reserve_table[t->rid].period.tv_nsec;
 */
@@ -968,7 +972,7 @@ int add_rm_queue(struct reserve *r)
 {
   // making sure we start with a null next
   r->rm_next = NULL;
-  
+
   if (rm_head == NULL){
     rm_head = r;
     r->rm_next = NULL;
@@ -995,10 +999,10 @@ int add_rm_queue(struct reserve *r)
       printk("ZSRMMV.add_rm_queue() ERROR rm_queue corrupted\n");
       return 0;
     }
-    
+
     r->rm_next = t->rm_next;
     t->rm_next = r;
-    
+
     /* if (t->rm_next == NULL){ */
     /*   t->rm_next = r; */
     /*   r->rm_next = NULL; */
@@ -1023,7 +1027,7 @@ int add_rm_queue(struct reserve *r)
 void del_rm_queue(struct reserve *r)
 {
   int rsv_visited=0;
-  
+
   if (rm_head == NULL) return;
   if (rm_head == r){
     rm_head = r->rm_next;
@@ -1037,11 +1041,11 @@ void del_rm_queue(struct reserve *r)
       t=t->rm_next;
       rsv_visited ++;
     }
-    
+
     if (rsv_visited > MAX_RESERVES && t->rm_next != NULL && t->rm_next != r){
       printk("ZSRMMV ERROR: del_rm_queue(rid=%d) rsv_visited > MAX_RESERVES\n",r->rid);
     }
-    
+
     if (t->rm_next == r){
       t->rm_next = r->rm_next;
       r->rm_next=NULL;
@@ -1070,7 +1074,7 @@ int calculate_rm_priorities(void)
   if (topprio >= DAEMON_PRIORITY){
     printk("ZSRMMV.calculate_rm_priorities(): WARNING assigning task priority higher than scheduler task priority. Timing cannot be guaranteed\n");
   }
-  
+
   /*@loop invariant fp1 && fp2 && fp31 && fp32 && zsrm1 && zsrm2 && zsrm3 && zsrm4 && zsrm7;
     @loop assigns reserve_table[0..(maxReserves-1)];
   */
@@ -1081,7 +1085,7 @@ int calculate_rm_priorities(void)
     if (t->priority <=0){
       printk("ZSRMMV.calculate_rm_priority(): ERROR assigned an invalid priority(%d) to rid(%d)\n",t->priority,t->rid);
     }
-#ifdef __ZS_DEBUG__    
+#ifdef __ZS_DEBUG__
     printk("ZSRMMV: calculate_rm_priorities(): assigning priority(%d) to rid(%d)\n",t->priority,t->rid);
 #endif
     t=t->rm_next;
@@ -1106,22 +1110,22 @@ int set_rm_priorities(void)
 {
   struct reserve *t=rm_head;
   int rsv_visited=0;
- 
+
   /*@loop invariant fp1 && fp2 && fp31 && fp32 && elemNull(t);
     @loop assigns task,t,p;*/
   rsv_visited=0;
   while(rsv_visited <= MAX_RESERVES && t!= NULL){
     rsv_visited++;
     if (t->pid >0){
-      push_to_activate(t->rid);      
+      push_to_activate(t->rid);
     } else {
       // pid == 0 means that it has not been attached
       if (t->pid != 0){
 	printk("ZSRMMV.set_rm_priorities() ERROR pid(%d) invalid\n",t->pid);
       } else {
-#ifdef __ZS_DEBUG__	
+#ifdef __ZS_DEBUG__
 	printk("ZSRMMV.set_rm_priorities() reserve rid(%d) not yet attached\n",t->rid);
-#endif	
+#endif
       }
     }
     t=t->rm_next;
@@ -1133,7 +1137,7 @@ int set_rm_priorities(void)
 
   // Activate activator task
   wake_up_process(active_task);
-  
+
   return 0;
 }
 
@@ -1208,8 +1212,8 @@ int set_rm_priorities(void)
   @ensures fp21 && fp22 && fp23;
   @ensures fp31 && fp32;
   @ensures zsrm_lem1 && zsrm2 && zsrm3 && zsrm4 && zsrm7;
-  @behavior b1: @assumes zsrm1 && zsrm2; @ensures zsrm1 && zsrm2;  
-  @behavior b2: @assumes zsrm1_stop1; @ensures zsrm1_stop1;  
+  @behavior b1: @assumes zsrm1 && zsrm2; @ensures zsrm1 && zsrm2;
+  @behavior b2: @assumes zsrm1_stop1; @ensures zsrm1_stop1;
   @behavior b3: @assumes zsrm1_stop2 && zsrm2; @ensures zsrm1_stop2 && zsrm2;
 */
 /*********************************************************************/
@@ -1248,7 +1252,7 @@ int capture_enforcement_signal(int rid, int pid, int signo)
   /*     return -3; */
   /*   } */
   /* } */
-  
+
   reserve_table[rid].enforcement_signal_captured = (pid < 0)? 0 : 1;
   reserve_table[rid].enforcement_signal_receiver_pid = pid;
   reserve_table[rid].enforcement_signo = signo;
@@ -1257,7 +1261,7 @@ int capture_enforcement_signal(int rid, int pid, int signo)
 
 int send_budget_enforcement_signal(struct task_struct *task, int signo, int rid){
   struct siginfo info;
-  
+
   info.si_signo = signo;
   info.si_value.sival_int = rid;
   info.si_errno = 0; // no recovery?
@@ -1331,7 +1335,7 @@ unsigned long long calculate_start_time(int rid){
 unsigned long long calculate_hypertask_preemption_time_ticks(int rid, unsigned long long now_ticks){
   int i;
   unsigned long long cumm_hyppreemption_ticks=0L;
-  
+
 
   // find first timestamp after rid started
   for (i=0;i<trace_index;i++)
@@ -1369,7 +1373,7 @@ void budget_enforcement(int rid, int request_stop)
   unsigned long long hypertask_preemption_time_ticks=0L;
 
   enforcement_start_timestamp_ticks = get_now_ticks();
-  
+
   // double check if we were preempted by a hypertask.
   // If so, adjust the CPU consumption and reprogram the timer
 
@@ -1387,7 +1391,7 @@ void budget_enforcement(int rid, int request_stop)
     for (i = 0; i< debug_log_buffer_index; i++){
       add_trace_record(debug_log[i].hyptask_id, debug_log[i].timestamp, debug_log[i].event_type);
     }
-    
+
     // build a preemption intersection after we add the trace
     hypertask_preemption_time_ticks = calculate_hypertask_preemption_time_ticks(rid, kernel_entry_timestamp_ticks);
 
@@ -1403,29 +1407,39 @@ void budget_enforcement(int rid, int request_stop)
       //printk("ZSRM.budget_enforcement(rid(%d)): MODIFIED current_exectime %llu ns \n",rid,ticks2ns1(reserve_table[rid].current_exectime_ticks));
       if (reserve_table[rid].exectime_ticks -
 	  (reserve_table[rid].current_exectime_ticks -
-	   reserve_table[rid].current_job_hypertasks_preemption_ticks)
+	   reserve_table[rid].current_job_hypertasks_preemption_ticks)>0
 	  ){
 
 	/*****************************************************************************
 	 * Correct the budget enforcement timer as if it has not happened and return *
 	 *****************************************************************************/
-	//printk("ZSRM.budget_enforcement(rid(%d)): RESETTING TIMER\n",rid);
-	start_enforcement_timer(&(reserve_table[rid]));
-	return;
+	// printk("ZSRM.budget_enforcement(rid(%d)): RESETTING TIMER at (%llu) timer (%llu) \n",rid,
+	//        get_now_ticks(),
+	//        (reserve_table[rid].exectime_ticks -
+	// 	(reserve_table[rid].current_exectime_ticks -
+	// 	 reserve_table[rid].current_job_hypertasks_preemption_ticks)
+	// 	)
+	//        );
+	if (start_enforcement_timer(&(reserve_table[rid])) == 0){
+	  // if enough time to defer the timer return otherwise assume that the timer expired
+	  return;
+	}
       } else {
 	//printk("ZSRM.budget_enforcement(rid(%d)): NOT RESETTING TIMER -- proceeding to enforce\n",rid);
       }
     }
   }
-  
+
 
   add_trace_record(rid, ticks2ns(kernel_entry_timestamp_ticks), TRACE_EVENT_BUDGET_ENFORCEMENT);//ticks2ns(enforcement_start_timestamp_ticks), TRACE_EVENT_BUDGET_ENFORCEMENT);
 #ifdef __ZS_DEBUG__
   printk("ZSRMMV: budget_enforcement(rid(%d)) pid(%d)\n",rid, reserve_table[rid].pid);
 #endif
-  
+
   // cancel the zero_slack timer just in case it is still active
-  hrtimer_cancel(&(reserve_table[rid].zero_slack_timer.kernel_timer));
+  if (reserve_table[rid].has_zsenforcement){
+    hrtimer_cancel(&(reserve_table[rid].zero_slack_timer.kernel_timer));
+  }
 
   reserve_table[rid].num_enforcements++;
 
@@ -1466,7 +1480,7 @@ void reset_exectime_counters(int rid)
   }
   reserve_table[rid].avg_exectime_ticks += reserve_table[rid].current_exectime_ticks;
   reserve_table[rid].avg_exectime_ticks_measurements ++;
-  
+
   reserve_table[rid].current_exectime_ns = 0;
   reserve_table[rid].current_exectime_ticks = 0;
   reserve_table[rid].in_critical_mode=0;
@@ -1488,7 +1502,7 @@ void init_exectime_counters(int rid)
   @ensures fp1;
   @ensures fp2;
   @ensures fp31 && fp32 && zsrm_lem1 && zsrm1 && zsrm2 && zsrm3 && zsrm4 && zsrm7;
-  @ensures \forall int i; 0 <= i < maxReserves ==> i != rid ==> 
+  @ensures \forall int i; 0 <= i < maxReserves ==> i != rid ==>
   reserve_table[i].real_exectime_ns == \old(reserve_table[i].real_exectime_ns);
   @ensures reserve_table[rid].real_exectime_ns == 0;
   @ensures zsrm8(rid);
@@ -1501,7 +1515,7 @@ void start_of_period(int rid)
   // overhead measurement
   arrival_start_timestamp_ticks = get_now_ticks();
   context_switch_start_timestamp_ticks = arrival_start_timestamp_ticks;
-    
+
   reserve_table[rid].current_job_activation_ticks = kernel_entry_timestamp_ticks;
   reserve_table[rid].current_job_hypertasks_preemption_ticks = 0L;
 
@@ -1516,9 +1530,9 @@ void start_of_period(int rid)
       }
   }
   reserve_table[rid].job_completed = 0;
-  
+
   //add_trace_record(rid,ticks2ns(arrival_start_timestamp_ticks),TRACE_EVENT_START_PERIOD);
-  
+
   //-- SC: reset "real execution time"
 #ifdef STAC_FRAMAC_STUBS
   reserve_table[rid].real_exectime_ns = 0;
@@ -1529,7 +1543,7 @@ void start_of_period(int rid)
     printk("ZSRMMV.start_of_period(): WARNING tried to start invalid reserve rid(%d)\n",rid);
     return;
   }
-  
+
   task = gettask(reserve_table[rid].pid,reserve_table[rid].task_namespace);
   if (task == NULL){
     printk("ZSRMMV.start_of_period(): WARNING tried to start reserve rid(%d) for dead process pid(%d) -- calling delete_reserve()\n",rid,reserve_table[rid].pid);
@@ -1555,7 +1569,7 @@ void start_of_period(int rid)
   }
 
   reset_exectime_counters(rid);
-  
+
   // start timers
 
 #ifdef __ZS_DEBUG__
@@ -1563,18 +1577,26 @@ void start_of_period(int rid)
 #endif
 
   // cancel the zero_slack timer just in case it is still active
-  hrtimer_cancel(&(reserve_table[rid].zero_slack_timer.kernel_timer));
-  add_timerq(&reserve_table[rid].zero_slack_timer);
+  if (reserve_table[rid].has_zsenforcement){
+    hrtimer_cancel(&(reserve_table[rid].zero_slack_timer.kernel_timer));
+    add_timerq(&reserve_table[rid].zero_slack_timer);
+  }
 
   // increment the number of jobs activated
   reserve_table[rid].job_activation_count ++;
 
   /**
-   * Now instead of programming the periodic timer at every period, we program it 
+   * Now instead of programming the periodic timer at every period, we program it
    * at reserve attachement and just request to be reprogrammed with HRTIMER_RESTART
    */
-  
-  add_timerq(&reserve_table[rid].period_timer);
+
+
+  /**
+   * The periodic timer is programmed within the kernel_timer_handler so it should not
+   * be here. Commenting it out
+   */
+
+  // add_timerq(&reserve_table[rid].period_timer);
 
   if (reserve_table[rid].criticality < sys_criticality){
     // should not start given that its criticality is lower
@@ -1582,15 +1604,15 @@ void start_of_period(int rid)
 
     printk("zsrm.start_of_period: rid(%d) lower crit than sys-crit\n",rid);
 
-#ifdef __ZS_DEBUG__    
+#ifdef __ZS_DEBUG__
     printk("zsrm.start_of_period: rid(%d) lower crit than sys-crit\n",rid);
-#endif    
+#endif
 
     arrival_end_timestamp_ticks = get_now_ticks();
     cumm_blocked_arrival_ticks += arrival_end_timestamp_ticks - arrival_start_timestamp_ticks;
     num_blocked_arrivals++;
     arrival_end_timestamp_ticks = arrival_start_timestamp_ticks=0L;
-    
+
     return;
   }
 
@@ -1610,7 +1632,7 @@ void start_of_period(int rid)
       add_trace_record(rid,ticks2ns(kernel_entry_timestamp_ticks),TRACE_EVENT_START_PERIOD_NON_PERIODIC_WAIT_WAKEUP);//ticks2ns(arrival_start_timestamp_ticks),TRACE_EVENT_START_PERIOD_NON_PERIODIC_WAIT_WAKEUP);
       wake_up_process(task);
       set_tsk_need_resched(task);
-      
+
       calling_start_from = 1;
       start_stac(rid);
     } else {
@@ -1621,7 +1643,7 @@ void start_of_period(int rid)
     add_trace_record(rid,ticks2ns(kernel_entry_timestamp_ticks),TRACE_EVENT_START_PERIOD_PERIODIC_WAIT);//ticks2ns(arrival_start_timestamp_ticks),TRACE_EVENT_START_PERIOD_PERIODIC_WAIT);
       wake_up_process(task);
       set_tsk_need_resched(task);
-      
+
       calling_start_from = 1;
       start_stac(rid);
   }
@@ -1639,7 +1661,7 @@ void start_of_period(int rid)
       wc_context_switch_ticks = (context_switch_end_timestamp_ticks -context_switch_start_timestamp_ticks);
     }
   } else {
-    // arrivals without context switch 
+    // arrivals without context switch
     cumm_arrival_ticks += arrival_end_timestamp_ticks - arrival_start_timestamp_ticks;
     num_arrivals++;
     if (wc_arrival_ticks < (arrival_end_timestamp_ticks - arrival_start_timestamp_ticks)){
@@ -1658,15 +1680,15 @@ void zs_enforcement(int rid)
 
   zs_enforcement_start_timestamp_ticks = get_now_ticks();
 
-#ifdef __ZS_DEBUG__  
+#ifdef __ZS_DEBUG__
   printk("zsrmv.zs_enforcement rid(%d)\n",rid);
 
-#endif  
+#endif
   if (reserve_table[rid].enforced || reserve_table[rid].criticality < sys_criticality){
     zs_enforcement_start_timestamp_ticks = 0L;
-#ifdef __ZS_DEBUG__    
+#ifdef __ZS_DEBUG__
     printk("zsrm.zs_enforcment rid(%d) is enforced itself\n",rid);
-#endif   
+#endif
     return;
   }
   //first set the new sys_criticality
@@ -1685,9 +1707,9 @@ void zs_enforcement(int rid)
       call_scheduler=1;
       // add to blocked reserves
       add_crit_blocked(r);
-#ifdef __ZS_DEBUG__      
+#ifdef __ZS_DEBUG__
       printk("zsrmv.zs_enforcement rid(%d) enforcing rid(%d)\n",rid, r->rid);
-#endif      
+#endif
     } else {
       rsv = rsv->next;
     }
@@ -1700,7 +1722,7 @@ void zs_enforcement(int rid)
 }
 
 /*********************************************************************/
-/*@requires fp1 && fp2 && fp31 && fp32 && zsrm_lem1 && 
+/*@requires fp1 && fp2 && fp31 && fp32 && zsrm_lem1 &&
   zsrm1 && zsrm2 && zsrm3 && zsrm4 && zsrm7;
   @requires elemt(timer);
   @assigns reserve_table[0..(maxReserves-1)],readyq,stac_now;
@@ -1713,15 +1735,15 @@ int timer_handler(struct zs_timer *timer)
 {
   // returns 1 if HRTIMER should restart, 0 otherwise
   int restart_timer;
-  
+
   kernel_entry_timestamp_ticks = get_now_ticks();
 
   restart_timer = 0;
-  
+
   // process the timer
-  //#ifdef __ZS_DEBUG__  
+  //#ifdef __ZS_DEBUG__
   printk("ZSRMMV: timer handler rid(%d) timer-type(%s)\n",timer->rid,STRING_TIMER_TYPE(timer->timer_type));
-  //#endif  
+  //#endif
 
   if (timer->rid <0 || timer->rid >= MAX_RESERVES ||(reserve_table[timer->rid].pid == -1)){
     printk("ZSRMMV: ERROR timer with invalid reserve rid(%d) or pid\n",timer->rid);
@@ -1755,7 +1777,7 @@ int timer_handler(struct zs_timer *timer)
 	     STRING_TIMER_TYPE(timer->timer_type),
 	     reserve_table[timer->rid].pid,
 	     timer->rid);
-      
+
       // make sure that request_stop is not set
       reserve_table[timer->rid].request_stop =0;
 
@@ -1791,7 +1813,7 @@ int attach_reserve(int rid, int pid)
 
   // mark the starting of the first period
   reserve_table[rid].start_period = 1;
-  
+
   reserve_table[rid].enforcement_timer.timer_type = TIMER_ENF;
   reserve_table[rid].period_timer.timer_type = TIMER_PERIOD;
   reserve_table[rid].period_timer.expiration.tv_sec = reserve_table[rid].period.tv_sec;
@@ -1832,15 +1854,21 @@ int attach_reserve(int rid, int pid)
   // mark as attached.
   reserve_table[rid].attached = 1;
 
-#ifdef __ZS_DEBUG__  
+#ifdef __ZS_DEBUG__
   printk("ZSRMMV: attached rid(%d) to pid(%d)\n",rid, pid);
 #endif
 
   // TODO: should we move this to the activator??
   add_timerq(&(reserve_table[rid].period_timer));
-  add_timerq(&(reserve_table[rid].zero_slack_timer));
+
+  if (reserve_table[rid].has_zsenforcement){
+    add_timerq(&(reserve_table[rid].zero_slack_timer));
+  }
 
   add_trace_record(rid,ticks2ns(kernel_entry_timestamp_ticks),TRACE_EVENT_START_PERIOD);//ticks2ns(get_now_ticks()),TRACE_EVENT_START_PERIOD);
+
+  // start hypertask hrtimer_restart
+	create_hypertask(rid);
 
   // record the first activation
   reserve_table[rid].first_job_activation_ns = ktime_to_ns(ktime_get());// ticks2ns(kernel_entry_timestamp_ticks);
@@ -1849,7 +1877,7 @@ int attach_reserve(int rid, int pid)
   reserve_table[rid].current_job_deadline_ticks = kernel_entry_timestamp_ticks +
     reserve_table[rid].hyp_enforcer_instant_ticks;
   reserve_table[rid].job_completed=1;
-  
+
   calling_start_from = 2;
   start_stac(rid);
   return 0;
@@ -1877,7 +1905,7 @@ int delete_reserve(int rid)
     printk("ZSRMMV: WARNING tried to delete invalid reserve");
     return -1;
   }
-  
+
   task = gettask(reserve_table[rid].pid,reserve_table[rid].task_namespace);
 
   /* Special case when the task died and we are forcing
@@ -1893,7 +1921,7 @@ int delete_reserve(int rid)
 
       // **** DEBUG READYQ ****
       //printk("ZSRMMV.delete_reserve(%d) accessing readyq\n",rid);
-      
+
       rsv_visited=0;
       while (rsv_visited <= MAX_RESERVES && t->next != NULL && t->next != &reserve_table[rid]){
 	t=t->next;
@@ -1903,7 +1931,7 @@ int delete_reserve(int rid)
       if (rsv_visited > MAX_RESERVES && t->next != NULL){
 	printk("ZSRMMV ERROR: delete_reserve(rid=%d) readyq corrupted rsv_visited > MAX_RESERVES\n",rid);
       }
-      
+
       if (t->next == &reserve_table[rid]){
 	t->next = reserve_table[rid].next;
 	reserve_table[rid].next = NULL;
@@ -1912,7 +1940,7 @@ int delete_reserve(int rid)
 
       // *** DEBUG READYQ ***
       //printk("ZSRMMV.delete_reserve(%d) accessing readyq\n",rid);
-      
+
       readyq = readyq->next;
       reserve_table[rid].next = NULL;
       if (readyq != NULL){
@@ -1922,9 +1950,9 @@ int delete_reserve(int rid)
 	    readyq->start_ticks = now_ticks;
 	    need_enforcement = start_enforcement_timer(readyq);
 	    if (need_enforcement){
-#ifdef __ZS_DEBUG__	      
+#ifdef __ZS_DEBUG__
 	      printk("ZSRMMV.delete_reserve(rid=%d) enforcing rid(%d) immediately after activation\n",rid,readyq->rid);
-#endif	      
+#endif
 	      budget_enforcement(readyq->rid,1);
 	    }
 	  }
@@ -1939,7 +1967,10 @@ int delete_reserve(int rid)
   }
   hrtimer_cancel(&(reserve_table[rid].enforcement_timer.kernel_timer));
   hrtimer_cancel(&(reserve_table[rid].period_timer.kernel_timer));
-  hrtimer_cancel(&(reserve_table[rid].zero_slack_timer.kernel_timer));
+
+  if (reserve_table[rid].has_zsenforcement){
+    hrtimer_cancel(&(reserve_table[rid].zero_slack_timer.kernel_timer));
+  }
 
   if (reserve_table[rid].hypertask_active){
 #ifndef __ZSV_SECURE_TASK_BOOTSTRAP__
@@ -1951,12 +1982,12 @@ int delete_reserve(int rid)
 #endif
   }
 
-#ifdef __ZS_DEBUG__  
+#ifdef __ZS_DEBUG__
   printk("ZSRMMV.delete reserve(): enforcements(%ld), wfnps(%ld)\n",
 	 reserve_table[rid].num_enforcements,
 	 reserve_table[rid].num_wfnp);
-#endif  
-  
+#endif
+
   reserve_table[rid].pid=-1;
   reserve_table[rid].next=NULL;
   if (task != NULL){
@@ -2024,12 +2055,12 @@ int start_enforcement_timer(struct reserve *rsvp)
     return 1;
   }
 
-#ifdef __ZS_DEBUG__  
+#ifdef __ZS_DEBUG__
   printk("ZSRMMV: start_enforcement_timer rid(%d) STARTED\n",rsvp->rid);
-#endif  
+#endif
   add_timerq(&(rsvp->enforcement_timer));
   return 0;
-  
+
   /* } else { */
   /*   stac_exit(); */
   /*   // already expired! */
@@ -2126,7 +2157,7 @@ void start(int rid)
 
   // *** DEBUG READYQ ***
   //printk("ZSRMMV.start(%d) accessing readyq called from(%s)\n",rid,NAME_START_FROM(calling_start_from));
-  
+
   if (readyq == NULL){
     readyq = &reserve_table[rid];
     new_runner=1;
@@ -2141,7 +2172,7 @@ void start(int rid)
     if (readyq->current_exectime_ticks + readyq->stop_ticks - readyq->start_ticks < readyq->current_exectime_ticks){
       stac_exit();
     }
-    
+
     readyq->current_exectime_ticks += readyq->stop_ticks - readyq->start_ticks;
 
     // cancel timer
@@ -2161,7 +2192,7 @@ void start(int rid)
       //while (tmp->next != NULL && tmp->next->priority >= reserve_table[rid].priority){
       rsv_visited = 0;
       //while (rsv_visited <= MAX_RESERVES && tmp->next != NULL && tmp->next->priority > reserve_table[rid].priority && tmp->rid != rid){
-      // Make sure we respect FIFO when same priority 
+      // Make sure we respect FIFO when same priority
       while (rsv_visited <= MAX_RESERVES && tmp->next != NULL && tmp->next->priority >= reserve_table[rid].priority && tmp->rid != rid){
 	rsv_visited++;
         tmp = tmp->next;
@@ -2173,7 +2204,7 @@ void start(int rid)
 	// break here!
 	return;
       }
-      
+
       if (rsv_visited > MAX_RESERVES && tmp->next != NULL){
 	tmp = readyq;
 	rsv_visited=0;
@@ -2185,7 +2216,7 @@ void start(int rid)
 	// break here
 	return;
       }
-      
+
       if (tmp->next != NULL){ // tmp->next->priority < reserve_table[rid].priority
         reserve_table[rid].next = tmp->next;
         tmp->next = &reserve_table[rid];
@@ -2212,7 +2243,7 @@ void start(int rid)
       }
     }
   }
-  
+
   /* if (need_enforcement){ */
   /*   budget_enforcement(readyq->rid); */
   /* } */
@@ -2272,7 +2303,7 @@ void stop(int rid)
 
   // *** DEBUG READYQ ***
   //printk("ZSRMMV.stop(%d) modifying readyq\n",rid);
-  
+
   inside_stop++;
 
   // make sure I have a correct rid
@@ -2337,7 +2368,7 @@ void stop(int rid)
       if (rsv_visited > MAX_RESERVES && t->next != NULL){
 	printk("ZSRMMV.stop(): tried to visit more than MAX_RESERVES\n");
       }
-      
+
       if (t->next == &reserve_table[rid]){
 	t->next = reserve_table[rid].next;
 	reserve_table[rid].next = NULL;
@@ -2372,7 +2403,7 @@ int wait_for_next_period(int rid, int nowait, int disableHypertask)
   //  return 0;
 
   reserve_table[rid].job_completed=1;
-  
+
   departure_start_timestamp_ticks = get_now_ticks();
 
   add_trace_record(rid, ticks2ns(kernel_entry_timestamp_ticks), TRACE_EVENT_WFNP);//ticks2ns(departure_start_timestamp_ticks), TRACE_EVENT_WFNP);
@@ -2383,8 +2414,10 @@ int wait_for_next_period(int rid, int nowait, int disableHypertask)
       printk("ZSRMV.wait_next_period(): error calling the hypertask disable\n");
     }
   }
-  
-  hrtimer_cancel(&(reserve_table[rid].zero_slack_timer.kernel_timer));
+
+  if (reserve_table[rid].has_zsenforcement){
+    hrtimer_cancel(&(reserve_table[rid].zero_slack_timer.kernel_timer));
+  }
 
   // Mark as periodic
   reserve_table[rid].non_periodic_wait=0;
@@ -2397,7 +2430,7 @@ int wait_for_next_period(int rid, int nowait, int disableHypertask)
 
   reserve_table[rid].start_period--;
   //printk("ZSRMMV.wait_for_next_period(%d): decremented start_period. Now: %d\n",rid,reserve_table[rid].start_period);
-  
+
   if (reserve_table[rid].in_critical_mode){
     reserve_table[rid].in_critical_mode=0;
     if (critical_reservesq == &reserve_table[rid]){
@@ -2410,9 +2443,9 @@ int wait_for_next_period(int rid, int nowait, int disableHypertask)
     }
     // only re-enable blocked tasks if I did not exceeded my nominal execution time
     if (reserve_table[rid].current_exectime_ticks <= reserve_table[rid].nominal_exectime_ticks){
-#ifdef __ZS_DEBUG__      
+#ifdef __ZS_DEBUG__
       printk("zsrm.wait_for_next_period(): rid(%d) did no exceed nominal -- waking up blocked reserves\n",rid);
-#endif      
+#endif
       // re-enable blocked reserves
       rsv_visited=0;
       while(rsv_visited <= MAX_RESERVES && crit_blockq!= NULL && crit_blockq->criticality >=sys_criticality){
@@ -2437,7 +2470,7 @@ int wait_for_next_period(int rid, int nowait, int disableHypertask)
     } else {
       // if I exceeded it take them out of the crit_block queue but do not
       // wake them up -- let their period timers wake them up
-#ifdef __ZS_DEBUG__      
+#ifdef __ZS_DEBUG__
       printk("zsrm.wait_for_next_period(): rid(%d) EXCEEDED nominal -- not waking blocked reserves\n",rid);
 #endif
       rsv_visited = 0;
@@ -2446,7 +2479,7 @@ int wait_for_next_period(int rid, int nowait, int disableHypertask)
     	crit_blockq = crit_blockq->crit_block_next;
       }
       if (rsv_visited > MAX_RESERVES && crit_blockq != NULL){
-	printk("ZSRMMV.wait_for_next_period(rid(%d)) [2]  ERROR crit_blockq corrupted\n",rid);	
+	printk("ZSRMMV.wait_for_next_period(rid(%d)) [2]  ERROR crit_blockq corrupted\n",rid);
       }
     }
   }
@@ -2462,13 +2495,13 @@ int wait_for_next_period(int rid, int nowait, int disableHypertask)
   // Only go to sleep if I have not received an unprocessed wakeup from
   // the period timer
   //if (reserve_table[rid].num_period_wakeups <= 0 ){ //&& !nowait){
-#ifdef __ZS_DEBUG__  
+#ifdef __ZS_DEBUG__
   printk("ZSRMMV: wait_next_period rid(%d) pid(%d) STOP\n",rid, current->pid);
-#endif  
+#endif
   set_current_state(TASK_INTERRUPTIBLE);
-#ifdef __ZS_DEBUG__  
+#ifdef __ZS_DEBUG__
   printk("ZSRMMV: wait_next_period rid(%d) pid(%d) RESUME\n",rid, current->pid);
-#endif    
+#endif
   /* } else { */
   /*   printk("ZSRMMV.wait_next_period(): skipping sleeping\n"); */
   /*   // reset wcet & acet counter */
@@ -2481,7 +2514,7 @@ int wait_for_next_period(int rid, int nowait, int disableHypertask)
   // periodic timer
   // --- ASSUMING atomic decrement
   reserve_table[rid].num_period_wakeups--;
-  
+
   return 0;
 }
 
@@ -2493,8 +2526,10 @@ int end_of_period(int rid)
   departure_start_timestamp_ticks = get_now_ticks();
 
   add_trace_record(rid, ticks2ns(kernel_entry_timestamp_ticks), TRACE_EVENT_END_PERIOD);//ticks2ns(departure_start_timestamp_ticks), TRACE_EVENT_END_PERIOD);
-  
-  hrtimer_cancel(&(reserve_table[rid].zero_slack_timer.kernel_timer));
+
+  if (reserve_table[rid].has_zsenforcement){
+    hrtimer_cancel(&(reserve_table[rid].zero_slack_timer.kernel_timer));
+  }
 
   prev_calling_stop_from=calling_stop_from;
   calling_stop_from=3;
@@ -2510,7 +2545,7 @@ int end_of_period(int rid)
 
   reserve_table[rid].start_period--;
   //printk("ZSRMMV.wait_for_next_period(%d): decremented start_period. Now: %d\n",rid,reserve_table[rid].start_period);
-  
+
   if (reserve_table[rid].in_critical_mode){
     reserve_table[rid].in_critical_mode=0;
     if (critical_reservesq == &reserve_table[rid]){
@@ -2523,9 +2558,9 @@ int end_of_period(int rid)
     }
     // only re-enable blocked tasks if I did not exceeded my nominal execution time
     if (reserve_table[rid].current_exectime_ticks <= reserve_table[rid].nominal_exectime_ticks){
-#ifdef __ZS_DEBUG__      
+#ifdef __ZS_DEBUG__
       printk("zsrm.wait_for_next_period(): rid(%d) did no exceed nominal -- waking up blocked reserves\n",rid);
-#endif      
+#endif
       // re-enable blocked reserves
       rsv_visited=0;
       while(rsv_visited <= MAX_RESERVES && crit_blockq!= NULL && crit_blockq->criticality >=sys_criticality){
@@ -2550,7 +2585,7 @@ int end_of_period(int rid)
     } else {
       // if I exceeded it take them out of the crit_block queue but do not
       // wake them up -- let their period timers wake them up
-#ifdef __ZS_DEBUG__      
+#ifdef __ZS_DEBUG__
       printk("zsrm.wait_for_next_period(): rid(%d) EXCEEDED nominal -- not waking blocked reserves\n",rid);
 #endif
       rsv_visited = 0;
@@ -2559,7 +2594,7 @@ int end_of_period(int rid)
     	crit_blockq = crit_blockq->crit_block_next;
       }
       if (rsv_visited > MAX_RESERVES && crit_blockq != NULL){
-	printk("ZSRMMV.wait_for_next_period(rid(%d)) [2]  ERROR crit_blockq corrupted\n",rid);	
+	printk("ZSRMMV.wait_for_next_period(rid(%d)) [2]  ERROR crit_blockq corrupted\n",rid);
       }
     }
   }
@@ -2575,7 +2610,7 @@ int end_of_period(int rid)
   // This is not a real wakeup yet... this will be registered in the
   // wait_for_next_release
   // reserve_table[rid].num_period_wakeups--;
-  
+
   return 0;
 }
 
@@ -2589,12 +2624,12 @@ int wait_for_next_release(int rid)
   if (reserve_table[rid].end_of_period_marked){
     if (reserve_table[rid].num_period_wakeups <= 0 ){
       add_trace_record(rid, ticks2ns(kernel_entry_timestamp_ticks), TRACE_EVENT_WAIT_RELEASE_BLOCKED);//ticks2ns(wait_arrival_timestamp_ticks), TRACE_EVENT_WAIT_RELEASE_BLOCKED);
-#ifdef __ZS_DEBUG__  
+#ifdef __ZS_DEBUG__
       printk("ZSRMMV: wait_next_period rid(%d) pid(%d) STOP\n",rid, current->pid);
-#endif  
+#endif
       set_current_state(TASK_INTERRUPTIBLE);
       reserve_table[rid].num_wait_release++;
-#ifdef __ZS_DEBUG__  
+#ifdef __ZS_DEBUG__
       printk("ZSRMMV: wait_next_period rid(%d) pid(%d) RESUME\n",rid, current->pid);
 #endif
     } else {
@@ -2602,7 +2637,7 @@ int wait_for_next_release(int rid)
       add_trace_record(rid, ticks2ns(kernel_entry_timestamp_ticks), TRACE_EVENT_WAIT_RELEASE_NOT_BLOCKED);//ticks2ns(wait_arrival_timestamp_ticks), TRACE_EVENT_WAIT_RELEASE_NOT_BLOCKED);
       start_stac(rid);
     }
-    
+
     // unmark the end of period
     reserve_table[rid].end_of_period_marked=0;
 
@@ -2611,10 +2646,10 @@ int wait_for_next_release(int rid)
   } else {
     // This means that the enforcer was called and it called wait_for_release() which completed the end_of_period()+wait_for_release() pair.
     // Hence, we now need to call for a full wait_for_next_period() instead.
-    
+
     wait_for_next_period(rid,0, 1);
   }
-  
+
   return 0;
 }
 
@@ -2625,8 +2660,8 @@ int wait_for_next_release(int rid)
 /*@requires zsrm_lem1;
   @assigns readyq, rm_head, reserve_table[0..(maxReserves-1)];
   @ensures readyq == \null && rm_head == \null;
-  @ensures \forall integer i; 0 <= i < maxReserves ==> 
-    (reserve_table[i].pid == -1 && 
+  @ensures \forall integer i; 0 <= i < maxReserves ==>
+    (reserve_table[i].pid == -1 &&
     reserve_table[i].rid == i &&
     reserve_table[i].next == \null &&
     reserve_table[i].rm_next == \null &&
@@ -2648,12 +2683,12 @@ int wait_for_next_release(int rid)
 void init(void)
 {
   int i;
-  
+
   readyq=NULL;
   rm_head=NULL;
-  
-  /*@loop invariant (\forall integer j; 
-    0 <= j < i ==> (reserve_table[j].pid == -1 && 
+
+  /*@loop invariant (\forall integer j;
+    0 <= j < i ==> (reserve_table[j].pid == -1 &&
       reserve_table[j].rid == j &&
       reserve_table[j].next == \null &&
       reserve_table[j].rm_next == \null &&
@@ -2668,7 +2703,7 @@ void init(void)
       reserve_table[j].real_start_ns == 0 &&
       reserve_table[j].period_timer.expiration.tv_sec == reserve_table[j].period.tv_sec &&
       reserve_table[j].period_timer.expiration.tv_nsec == reserve_table[j].period.tv_nsec &&
-      reserve_table[j].period_timer.rid == j && 
+      reserve_table[j].period_timer.rid == j &&
       reserve_table[j].enforcement_timer.rid == j)) && zsrm_lem1;
     @loop assigns i,reserve_table[0..(maxReserves-1)];*/
   for (i=0;i<MAX_RESERVES;i++) {
@@ -2749,11 +2784,12 @@ void init_reserve(int rid)
   reserve_table[rid].start_period=0;
   reserve_table[rid].hypertask_active=0;
   reserve_table[rid].has_hyptask=0;
+  reserve_table[rid].has_zsenforcement = 0;
 
   printk("ZSRMV: init_reserve(rid(%d))\n",rid);
   // init timers to make sure we do not crash the kernel
   // if timer operations are called before we arm the timer.
-  
+
   /* hrtimer_init(&(reserve_table[rid].period_timer.kernel_timer), CLOCK_MONOTONIC_RAW, HRTIMER_MODE_REL); */
   /* hrtimer_init(&(reserve_table[rid].enforcement_timer.kernel_timer), CLOCK_MONOTONIC_RAW, HRTIMER_MODE_REL); */
   /* hrtimer_init(&(reserve_table[rid].zero_slack_timer.kernel_timer), CLOCK_MONOTONIC_RAW, HRTIMER_MODE_REL); */
@@ -2778,7 +2814,7 @@ int getreserve()
 {
   int i=0;
 
-  /*@loop invariant (0 <= i <= maxReserves) && fp1 && fp2 && fp31 && fp32 
+  /*@loop invariant (0 <= i <= maxReserves) && fp1 && fp2 && fp31 && fp32
     && zsrm1 && zsrm2 && zsrm3 && zsrm4;
     @loop assigns i,reserve_table[0..(maxReserves-1)];*/
   for(i=0;i<MAX_RESERVES;i++){
@@ -2849,7 +2885,7 @@ enum hrtimer_restart kernel_timer_handler(struct hrtimer *ktimer){
   tries = 1000000;
   while(tries >0 && !(locked = spin_trylock_irqsave(&zsrmlock,flags)))
     tries--;
-  
+
   if (!locked){
     zstimer = kernel_timer2zs_timer(ktimer);
     printk("ZSRMMV.kernel_timer_handler(type(%s)) spinlock locked by type(%s) cmd(%s): tied %d times. ABORT!\n",
@@ -2858,14 +2894,14 @@ enum hrtimer_restart kernel_timer_handler(struct hrtimer *ktimer){
 	   STRING_ZSV_CALL(zsrmcall),
 	   1000000);
     return HRTIMER_NORESTART;
-  }	
+  }
 
   //spin_lock_irqsave(&zsrmlock,flags);
 
   zstimer = kernel_timer2zs_timer(ktimer);
 
   prevlocker = zstimer->timer_type;
-  
+
   if (zstimer != NULL){
     restart_timer = timer_handler(zstimer);
     if (restart_timer){
@@ -2884,7 +2920,7 @@ enum hrtimer_restart kernel_timer_handler(struct hrtimer *ktimer){
   } else {
     printk("ZSRMV: kernel_timer_handler: zstimer == NULL\n");
   }
-  
+
   spin_unlock_irqrestore(&zsrmlock,flags);
   return krestart; //HRTIMER_NORESTART;
 }
@@ -2900,9 +2936,9 @@ int push_to_reschedule(int i){
     top++;
     reschedule_stack[top]=i;
     ret =0;
-  } else	
+  } else
     ret=-1;
-  
+
   //spin_unlock_irqrestore(&reschedule_lock,flags);
   return ret;
 }
@@ -2927,13 +2963,13 @@ static void scheduler_task(void *a){
   struct task_struct *task;
   unsigned long flags;
   //int swap_task=0;
-  
+
   while (!kthread_should_stop()) {
     // prevent concurrent execution with interrupts
     spin_lock_irqsave(&zsrmlock,flags);
 
     kernel_entry_timestamp_ticks = get_now_ticks();
-  
+
     prevlocker = SCHED_TASK;
     while ((rid = pop_to_reschedule()) != -1) {
       if (reserve_table[rid].request_stop){
@@ -2945,9 +2981,9 @@ static void scheduler_task(void *a){
 	    delete_reserve(rid);
 	    continue;
 	  }
-#ifdef __ZS_DEBUG__	  
+#ifdef __ZS_DEBUG__
 	  printk("ZSRMMV: sched_task: stopping rsv(%d)\n",rid);
-#endif	  
+#endif
 	  set_task_state(task, TASK_INTERRUPTIBLE);
 	  //swap_task=0;
 	  set_tsk_need_resched(task);
@@ -2973,16 +3009,16 @@ static void scheduler_task(void *a){
 	  delete_reserve(rid);
 	  continue;
 	}
-#ifdef __ZS_DEBUG__	
+#ifdef __ZS_DEBUG__
 	printk("ZSRMMV: sched_task: set prio(%d) for pid(%d)\n",p.sched_priority, reserve_table[rid].pid);
-#endif 	
+#endif
 	if ((task->state & TASK_INTERRUPTIBLE) || (task->state & TASK_UNINTERRUPTIBLE)){
 	  wake_up_process(task);
 	}
 	sched_setscheduler(task, SCHED_FIFO, &p);
 
 	calling_start_from = 4;
-	
+
 	start_stac(rid);
       }
     }
@@ -3005,9 +3041,9 @@ static void scheduler_task(void *a){
       num_zs_enforcements++;
       zs_enforcement_end_timestamp_ticks = zs_enforcement_start_timestamp_ticks = 0L;
     }
-    
+
     spin_unlock_irqrestore(&zsrmlock,flags);
-    
+
     set_current_state(TASK_INTERRUPTIBLE);
     schedule();
   }
@@ -3024,9 +3060,9 @@ int push_to_activate(int i){
     activate_top++;
     activate_stack[activate_top]=i;
     ret =0;
-  } else	
+  } else
     ret=-1;
-  
+
   spin_unlock_irqrestore(&activate_lock,flags);
   return ret;
 }
@@ -3044,13 +3080,49 @@ int pop_to_activate(void){
   return ret;
 }
 
+
+/**
+ * Separate hypertask creating to be able to experiment
+ */
+
+void create_hypertask(int rid)
+{
+  if (!reserve_table[rid].hypertask_active){
+#ifndef __ZSV_SECURE_TASK_BOOTSTRAP__
+    if (reserve_table[rid].has_hyptask){
+      if(!hypmtscheduler_createhyptask(
+				       reserve_table[rid].hyp_enforcer_instant.tv_sec * HYPMTSCHEDULER_TIME_1SEC +
+				       (reserve_table[rid].hyp_enforcer_instant.tv_nsec / (1000 * 1000)) * HYPMTSCHEDULER_TIME_1MSEC,
+
+				       reserve_table[rid].period.tv_sec * HYPMTSCHEDULER_TIME_1SEC +
+				       (reserve_table[rid].period.tv_nsec / (1000 * 1000)) * HYPMTSCHEDULER_TIME_1MSEC,
+
+				       reserve_table[rid].priority, // priority
+				       rid, // 3, // hyptask_id?
+				       &(reserve_table[rid].hyptask_handle))){
+	printk(KERN_INFO "ZSRMV.activator_task(): hypmtschedulerkmod: create_hyptask failed\n");
+      } else {
+	if (!hypmtscheduler_guestjobstart(reserve_table[rid].hyptask_handle)) {
+	  printk("ZSRMV.activator_task(): hypmtscheduler_guestjobstart() FAILED\n");
+	} else {
+	  reserve_table[rid].hypertask_active=1;
+	  printk("ZSRMV.activator_task(): hyptscheduler_createhyptask() SUCCESSFUL\n");
+	}
+      }
+    }
+#else
+    reserve_table[rid].hypertask_active=1;
+#endif
+  }
+}
+
 static void activator_task(void *a)
 {
   int rid;
   /* int cnt,ret; */
   struct sched_param p;
   struct task_struct *task;
-  
+
   while (!kthread_should_stop()) {
     // prevent concurrent execution with interrupts
     prevlocker = SCHED_TASK;
@@ -3078,74 +3150,16 @@ static void activator_task(void *a)
 	set_cpus_allowed_ptr(task,cpumask_of(0));
 #endif
       }
-      
+
       if (sched_setscheduler(task, SCHED_FIFO, &p)<0){
 	printk("ZSRMMV.activator_task(): ERROR could not set priority(%d) to pid(%d)\n",p.sched_priority, reserve_table[rid].pid);
       } else {
 	printk("ZSRMMV.activator_task(): set priority(%d) to pid(%d)\n",p.sched_priority, reserve_table[rid].pid);
       }
 
-
-      /* start_tick = sysreg_read_cntpct(); */
-      /* for (cnt =0 ; cnt <1000;cnt++) */
-      /* 	ret=cnt+1; */
-      /* end_tick = sysreg_read_cntpct(); */
-      
-      /* printk("ZSRMV.activator_task(): cycle counter test (for-loop 1000) start(%llu) end(%llu) count=%llu\n",start_tick, end_tick, (end_tick-start_tick)); */
-
-      /** 
-       *  I should not "re-create" the hypertask if it was already created
-       */      
-      //reserve_table[rid].hypertask_active=0;
-      
-      /* if (reserve_table[rid].period.tv_sec != reserve_table[rid].hyp_enforcer_instant.tv_sec || */
-      /* 	  reserve_table[rid].period.tv_nsec != reserve_table[rid].hyp_enforcer_instant.tv_nsec){ */
-
-      if (!reserve_table[rid].hypertask_active){
-	/* printk("ZSRMV: createhyptask FIRST PERIOD: (%u) (0x%08x) cyclecount : REGULAR PERIOD (%u) (0x%08x)\n", */
-	/*        (reserve_table[rid].hyp_enforcer_instant.tv_sec * HYPMTSCHEDULER_TIME_1SEC + */
-	/* 	(reserve_table[rid].hyp_enforcer_instant.tv_nsec / 1000) * HYPMTSCHEDULER_TIME_1USEC), */
-	/*        (reserve_table[rid].hyp_enforcer_instant.tv_sec * HYPMTSCHEDULER_TIME_1SEC + */
-	/* 	(reserve_table[rid].hyp_enforcer_instant.tv_nsec / 1000) * HYPMTSCHEDULER_TIME_1USEC), */
-	/*        (reserve_table[rid].period.tv_sec * HYPMTSCHEDULER_TIME_1SEC + */
-	/* 	(reserve_table[rid].period.tv_nsec / 1000) * HYPMTSCHEDULER_TIME_1USEC), */
-	/*        (reserve_table[rid].period.tv_sec * HYPMTSCHEDULER_TIME_1SEC + */
-	/* 	(reserve_table[rid].period.tv_nsec / 1000) * HYPMTSCHEDULER_TIME_1USEC)); */
-
-
-	/**
-	 * TODO:
-	 *   *** UGLY HACK ***
-	 * At this point we use the reserve id as the hypertask id as well. We may want to have a parameter pass down from the userspace
-	 * 
-	 */
-#ifndef __ZSV_SECURE_TASK_BOOTSTRAP__
-	if (reserve_table[rid].has_hyptask){
-	  if(!hypmtscheduler_createhyptask(
-					   reserve_table[rid].hyp_enforcer_instant.tv_sec * HYPMTSCHEDULER_TIME_1SEC +
-					   (reserve_table[rid].hyp_enforcer_instant.tv_nsec / (1000 * 1000)) * HYPMTSCHEDULER_TIME_1MSEC,
-
-					   reserve_table[rid].period.tv_sec * HYPMTSCHEDULER_TIME_1SEC +
-					   (reserve_table[rid].period.tv_nsec / (1000 * 1000)) * HYPMTSCHEDULER_TIME_1MSEC,
-
-					   p.sched_priority, // priority
-					   rid, // 3, // hyptask_id?
-					   &(reserve_table[rid].hyptask_handle))){
-	    printk(KERN_INFO "ZSRMV.activator_task(): hypmtschedulerkmod: create_hyptask failed\n");
-	  } else {
-	    if (!hypmtscheduler_guestjobstart(reserve_table[rid].hyptask_handle)) {
-		printk("ZSRMV.activator_task(): hypmtscheduler_guestjobstart() FAILED\n");
-	    } else {
-	      reserve_table[rid].hypertask_active=1;
-	      printk("ZSRMV.activator_task(): hyptscheduler_createhyptask() SUCCESSFUL\n");
-	    }
-	  }
-	}
-#else
-	reserve_table[rid].hypertask_active=1;
-#endif
-      }      
-    }    
+			// We'll try creating the hypertask in the attach_reserve
+      //create_hypertask(rid);
+    }
     set_current_state(TASK_INTERRUPTIBLE);
     schedule();
   }
@@ -3165,8 +3179,8 @@ void set_ticksperus(unsigned long long ticks, unsigned long long nanos){
   printk("ZSRMV: set_ticksperus(): rdcntfrq(%llu)\n",ticksperus);
   ticksperus = DIV(ticksperus, 1000000UL);
   printk("ZSRMV. ticksperus=%llu\n",ticksperus);
-#else  
-  
+#else
+
   ticksperus = ticks *1000;
   //ticksperus = ticks *10;
   ticksperus = DIV(ticksperus,nanos);
@@ -3187,8 +3201,8 @@ unsigned long long ticks2ns(unsigned long long ticks)
 /* } */
 /* #else */
 
-  
-unsigned long long ticks2ns1(unsigned long long ticks) 
+
+unsigned long long ticks2ns1(unsigned long long ticks)
 {
 
 /* #ifdef __ZS_USE_TSC__   */
@@ -3204,7 +3218,7 @@ unsigned long long ticks2ns1(unsigned long long ticks)
 #else
   return ticks;
 #endif
-  
+
 }
 /* #endif */
 
@@ -3251,16 +3265,16 @@ void setup_ticksclock(void)
   //hypmtscheduler_getrawtick64(&start_cycles);
   // start_cycles = rdtsc64();
   start_cycles = sysreg_read_cntpct();
-  
+
   start_ns = get_now_ns();
 
   msleep(100);
-  
+
   /* while (i<10000000){ */
   /*   i = start_ns + i +1;//get_now_ns() - start_ns; */
   /* } */
 
-    
+
   end_ns = get_now_ns();
 
   //hypmtscheduler_getrawtick64(&end_cycles);
@@ -3269,7 +3283,7 @@ void setup_ticksclock(void)
 
   set_ticksperus(end_cycles-start_cycles,end_ns-start_ns);
 #endif
-  
+
 }
 #else
 {
@@ -3283,7 +3297,7 @@ void setup_ticksclock(void)
     i = get_now_ns() - start;
   }
   ktime_get_snapshot(&snap1);
-  set_ticksperus((snap1.cycles-snap.cycles),(snap1.raw.tv64-snap.raw.tv64));  
+  set_ticksperus((snap1.cycles-snap.cycles),(snap1.raw.tv64-snap.raw.tv64));
 }
 #endif
 #endif
@@ -3302,8 +3316,8 @@ void setup_ticksclock(void)
   @ensures fp21 && fp22 && fp23;
   @ensures fp31 && fp32;
   @ensures zsrm_lem1 && zsrm2 && zsrm3 && zsrm4 && zsrm7;
-  @behavior b1: @assumes zsrm1 && zsrm2; @ensures zsrm1 && zsrm2;  
-  @behavior b2: @assumes zsrm1_stop1; @ensures zsrm1_stop1;  
+  @behavior b1: @assumes zsrm1 && zsrm2; @ensures zsrm1 && zsrm2;
+  @behavior b2: @assumes zsrm1_stop1; @ensures zsrm1_stop1;
   @behavior b3: @assumes zsrm1_stop2 && zsrm2; @ensures zsrm1_stop2 && zsrm2;
 */
 /*********************************************************************/
@@ -3359,8 +3373,8 @@ static int zsrm_release(struct inode *inode, struct file *filp)
 
 int test_reserve(int option)
 {
-    static uint32_t hyptask_handle1; 
-    static uint32_t hyptask_handle2; 
+    static uint32_t hyptask_handle1;
+    static uint32_t hyptask_handle2;
 
     switch (option){
     case 0:
@@ -3374,7 +3388,7 @@ int test_reserve(int option)
 	printk(KERN_INFO "ZSRMV.test_reserve(): hypmtschedulerkmod: create_hyptask1 failed\n");
       } else {
 	printk(KERN_INFO "ZSRMV.test_reserve(): hyptask1 created\n");
-      } 
+      }
 
     	if(!hypmtscheduler_createhyptask(//1 * HYPMTSCHEDULER_TIME_1SEC, // first time
 				       //500000 * HYPMTSCHEDULER_TIME_1USEC,
@@ -3387,7 +3401,7 @@ int test_reserve(int option)
 	printk(KERN_INFO "ZSRMV.test_reserve(): hypmtschedulerkmod: create_hyptask2 failed\n");
       } else {
 	printk(KERN_INFO "ZSRMV.test_reserve(): hyptask2 created\n");
-      } 
+      }
 
       break;
     case 1:
@@ -3411,7 +3425,7 @@ int test_reserve(int option)
 	printk("ZSRMV.test_reserve(): wrong option\n");
 	break;
     }
-    
+
   return 0;
 }
 
@@ -3471,7 +3485,7 @@ int serial_receiving_buffer_write(u8 *buffer, int len)
   //}
 
   up(&serial_buffer_sem);
-  
+
   return wrote;
 }
 
@@ -3486,12 +3500,12 @@ int serial_receiving_buffer_read(u8 *buffer, int len)
     up(&serial_buffer_sem);
     //printk("ZSRM.serial_receiving_buffer_read(): EMPTY going to sleep\n");
     SERIAL_DEBUG_FLAG_ON(SERIAL_FLAG_RCV_READ_BLOCKED);
-    wait_event_interruptible(serial_read_wait_queue, 
+    wait_event_interruptible(serial_read_wait_queue,
     			     (serial_receiving_writing_index != serial_receiving_reading_index ));
     SERIAL_DEBUG_FLAG_OFF(SERIAL_FLAG_RCV_READ_BLOCKED);
     down_interruptible(&serial_buffer_sem);
   }
-  
+
   while(serial_receiving_writing_index != serial_receiving_reading_index && i<len){
     buffer[i] = serial_receiving_buffer[serial_receiving_reading_index];
     serial_receiving_reading_index = SERIAL_RECEIVING_CIRCULAR_INC(serial_receiving_reading_index);
@@ -3500,7 +3514,7 @@ int serial_receiving_buffer_read(u8 *buffer, int len)
   }
 
   up(&serial_buffer_sem);
-  
+
   return read;
 }
 
@@ -3522,7 +3536,7 @@ enum hrtimer_restart serial_kernel_timer_handler(struct hrtimer *ktimer){
   /* if (serial_timer_largest_elapsed_ticks < elapsed_ticks){ */
   /*   serial_timer_largest_elapsed_ticks = elapsed_ticks; */
   /* } */
-  
+
   wake_up_process(serial_recv_task);
   set_tsk_need_resched(serial_recv_task);
 
@@ -3543,10 +3557,10 @@ static void serial_receiver_task(void *a)
   int wasempty=0;
 
   printk("ZSRMV.serial_receiver_task() READY!\n");
-  
+
   while (!kthread_should_stop()) {
     len_read=0;
-#ifdef __SERIAL_HARDWARE_CONTROL_FLOW__      
+#ifdef __SERIAL_HARDWARE_CONTROL_FLOW__
     serial_stop_transmission();
     SERIAL_DEBUG_FLAG_ON(SERIAL_FLAG_HWR_SND_BLOCKED);
 #endif
@@ -3574,7 +3588,7 @@ static void serial_receiver_task(void *a)
 	serial_debug_num_zero_receive_counts++;
       }
     } while(!readbufferexhausted || kthread_should_stop());
-#ifdef __SERIAL_HARDWARE_CONTROL_FLOW__      
+#ifdef __SERIAL_HARDWARE_CONTROL_FLOW__
     serial_resume_transmission();
     SERIAL_DEBUG_FLAG_OFF(SERIAL_FLAG_HWR_SND_BLOCKED);
 #endif
@@ -3583,18 +3597,18 @@ static void serial_receiver_task(void *a)
     if (!kthread_should_stop()){
       usleep_range(290,300);
     }
-    
+
     /* set_current_state(TASK_INTERRUPTIBLE); */
     /* schedule(); */
 
-    
+
     serial_debug_after_sleep_timestamp_ticks = get_now_ticks();
     serial_debug_sleep_elapsed_interval_ticks = (serial_debug_after_sleep_timestamp_ticks - serial_debug_before_sleep_timestamp_ticks);
     if(serial_debug_max_sleep_ticks < serial_debug_sleep_elapsed_interval_ticks){
       serial_debug_max_sleep_ticks = serial_debug_sleep_elapsed_interval_ticks;
     }
   }
-  
+
   printk("ZSRMV.serial_receiver_task() EXITING\n");
 }
 
@@ -3670,7 +3684,7 @@ int serial_sending_buffer_read(u8 *buffer, int len){
   }
 
   up(&serial_sending_buffer_sem);
-  
+
   return read;
 
 }
@@ -3683,7 +3697,7 @@ static void serial_sending_task(void *a){
   int sending_index=0;
   int batch_size;
   int ret;
-  
+
   while(!kthread_should_stop()){
     while(sending_task_active && !kthread_should_stop()){
       sending_index=0;
@@ -3713,7 +3727,7 @@ int serial_recv_task_running=0;
 int init_serial(u32 bauds)
 {
   mavlinkserhb_initialize(bauds);
-  
+
   /* if (!mavlinkserhb_activatehbhyptask(300 * HYPMTSCHEDULER_TIME_1USEC, 300 * HYPMTSCHEDULER_TIME_1USEC, 10)){ */
   /*   printk("ZSRM.init_serial(): error starting serial hyptask\n"); */
   /* } */
@@ -3730,7 +3744,7 @@ int init_serial(u32 bauds)
 
   return 0;
 }
-		
+
 int send(int rid, void *buffer, int buf_len, int finished)
 {
   int ret;
@@ -3745,7 +3759,7 @@ int send(int rid, void *buffer, int buf_len, int finished)
 			   );
     } else {
       // return error: too late to send
-      ret = -2; 
+      ret = -2;
       wait_for_next_period(rid,
 			   0,
 			   0 // do not disable hypertask -- if normal actuation was not sent then allow hypertask to send default safe actuation
@@ -3755,7 +3769,7 @@ int send(int rid, void *buffer, int buf_len, int finished)
     //ret = mavlinkserhb_send(buffer,buf_len);
     ret = (serial_sending_buffer_write(buffer,buf_len) == buf_len) ? 1: 0;
   }
-  
+
   return ret;
 }
 
@@ -3778,7 +3792,7 @@ int receive(int rid, u8 *buffer, int buf_len, unsigned long *flags)
     /**
      *  TODO: For multithreaded use this wait needs to be in a loop until the read from the buffer returns non-zero
      *        We defer this modification until after the demos
-     */ 
+     */
     /* wait_event_interruptible(serial_read_wait_queue, */
     /* 			     (serial_receiving_writing_index != serial_receiving_reading_index )); */
     // re-acquire semaphore and disable interrutps
@@ -3788,14 +3802,14 @@ int receive(int rid, u8 *buffer, int buf_len, unsigned long *flags)
 
     if (down_interruptible(&zsrmsem) < 0){
       printk("ZSRMV.receive(): could not re-acquire semaphore after sleep\n");
-    } 
-    
+    }
+
     // disable interrupts to avoid concurrent interrupts
     spin_lock_irqsave(&zsrmlock, *flags);
-    
+
     /* ret = serial_receiving_buffer_read(buffer,buf_len); */
   /* } */
-  
+
   return ret;
 }
 
@@ -3807,7 +3821,7 @@ static void simulate_crash(void)
 {
   char *argv[] = {"/bin/sync", NULL};
   char *envp[] = {"HOME=/", "TERM=linux", "PATH=/sbin:/bin:/usr/sbin:/usr/bin", NULL};
-  call_usermodehelper(argv[0],argv,envp, UMH_WAIT_PROC);  
+  call_usermodehelper(argv[0],argv,envp, UMH_WAIT_PROC);
   panic("Simulated Crash");
   printk("ZSRM.simulate_crash() FAILED. call to panic() returned\n");
 }
@@ -3841,13 +3855,13 @@ static ssize_t zsrm_read(struct file *filp,	/* see include/linux/fs.h   */
   transfer_size = (length >= (trace_index * sizeof(struct trace_rec_t))) ?
     (trace_index * sizeof(struct trace_rec_t)) :
     (length / sizeof(struct trace_rec_t)) * sizeof(struct trace_rec_t) ;
-  
+
   if (copy_to_user(buffer, trace_table, transfer_size)<0){
       printk(KERN_WARNING "ZSRMV: error copying trace_table to user space\n");
   }
 
   trace_index = 0;
-		   
+
   return transfer_size;
 }
 
@@ -3877,7 +3891,7 @@ static ssize_t zsrm_write
   unsigned long flags;
   unsigned long long wcet;
   unsigned long long Z;
-  
+
   /* copy data to kernel buffer. */
   if (copy_from_user(&call, buf, count)) {
     printk(KERN_WARNING "ZSRMMV: failed to copy data.\n");
@@ -3885,21 +3899,21 @@ static ssize_t zsrm_write
   }
 
   // try to lock semaphore to prevent concurrent syscalls
-  // before disabling interrupts  
+  // before disabling interrupts
   if ((ret = down_interruptible(&zsrmsem)) < 0){
     return ret;
-  } 
+  }
 
   // disable interrupts to avoid concurrent interrupts
   spin_lock_irqsave(&zsrmlock,flags);
 
   kernel_entry_timestamp_ticks = get_now_ticks();
 
-  
+
   // *** DEBUG LOCKER
   prevlocker = ZSV_CALL;
   zsrmcall = call.cmd;
-  
+
   switch (call.cmd) {
   case SIM_CRASH:
 #ifdef ZSV_SIMULATE_CRASH
@@ -3997,7 +4011,7 @@ static ssize_t zsrm_write
 	reserve_table[ret].hyp_enforcer_instant.tv_nsec = call.hyp_enforcer_nsec;
 	reserve_table[ret].has_hyptask = 1;
       }
-      
+
       reserve_table[ret].period_ns = (call.period_sec * 1000000000L) +
 	call.period_nsec;
       reserve_table[ret].period_ticks = ns2ticks(reserve_table[ret].period_ns);
@@ -4016,15 +4030,18 @@ static ssize_t zsrm_write
       reserve_table[ret].zsinstant_ns = (call.zsinstant_sec * 1000000000L)+call.zsinstant_nsec;
       reserve_table[ret].hyp_enforcer_instant_ns = (call.hyp_enforcer_sec * 1000000000L) + call.hyp_enforcer_nsec;
       reserve_table[ret].hyp_enforcer_instant_ticks = ns2ticks(reserve_table[ret].hyp_enforcer_instant_ns);
-      
+
       // verify if zero slack instant is the same as period set it to twice its value to ensure that it does not
       // have the possibility of triggering before the end of period (effectively disabling it).
       if (reserve_table[ret].period_ns == ((call.zsinstant_sec * 1000000000L)+call.zsinstant_nsec)){
 	// simple both secs and nsecs are doubled
 	reserve_table[ret].zsinstant.tv_sec *= 2;
 	reserve_table[ret].zsinstant.tv_nsec *= 2;
+	reserve_table[ret].has_zsenforcement = 0;
+      } else {
+	reserve_table[ret].has_zsenforcement = 1;
       }
-      
+
       //if (admit(reserve_table, MAX_RESERVES, &reserve_table[ret],&Z)){
       if (1){
 	reserve_table[ret].zsinstant_ns = Z;
@@ -4033,25 +4050,27 @@ static ssize_t zsrm_write
 	  reserve_table[ret].zsinstant_ns *= 2;
 	}
 
-	reserve_table[ret].zsinstant = ktime_to_timespec(ns_to_ktime(reserve_table[ret].zsinstant_ns));
+	if (reserve_table[ret].has_zsenforcement){
+	  reserve_table[ret].zsinstant = ktime_to_timespec(ns_to_ktime(reserve_table[ret].zsinstant_ns));
+	}
 
 	/* reserve_table[ret].zsinstant.tv_sec =  reserve_table[ret].zsinstant_ns / 1000000000L; */
 	/* reserve_table[ret].zsinstant.tv_nsec = reserve_table[ret].zsinstant_ns % 1000000000L; */
-	
+
 	add_rm_queue(&reserve_table[ret]);
-#ifdef __ZS_DEBUG__	
+#ifdef __ZS_DEBUG__
 	printk("zsrmv.create_rsv: rid(%d) period: sec(%ld) nsec(%ld) zs: sec(%ld), nsec(%ld) \n",
 	       ret,call.period_sec, call.period_nsec,
 	       call.zsinstant_sec, call.zsinstant_nsec);
-#endif	
-      } else {	    
+#endif
+      } else {
 	reserve_table[ret].pid=-1; // mark unused
 	ret = -1;
       }
     }
     break;
   case ATTACH_RSV:
-#ifdef __ZS_DEBUG__    
+#ifdef __ZS_DEBUG__
     printk("ZSRMMV: received attach rid(%d), pid(%d)\n",call.rid,call.pid);
 #endif
     if (!active_rid(call.rid)){
@@ -4075,13 +4094,13 @@ static ssize_t zsrm_write
 	reserve_table[call.rid].start_timer.timer_type = TIMER_START;
 	reserve_table[call.rid].start_timer.expiration = ktime_to_timespec(ns_to_ktime(start_ns));
 	add_timerq(&(reserve_table[call.rid].start_timer));
-	
+
 	// put caller task to sleep
 	set_current_state(TASK_INTERRUPTIBLE);
-	
+
 	ret = 0;
 	need_reschedule=0;
-#else	
+#else
 	ret = attach_reserve(call.rid,call.pid);
 #endif
 	need_reschedule=1;
@@ -4089,7 +4108,7 @@ static ssize_t zsrm_write
     }
     break;
   case DELETE_RSV:
-#ifdef __ZS_DEBUG__    
+#ifdef __ZS_DEBUG__
     printk("ZSRMMV: received delete rid(%d)\n",call.rid);
 #endif
     if (!valid_rid(call.rid)){
@@ -4120,7 +4139,7 @@ static ssize_t zsrm_write
     }
     break;
   case CAPTURE_ENFORCEMENT_SIGNAL:
-#ifdef __ZS_DEBUG__    
+#ifdef __ZS_DEBUG__
     printk("ZSRMMV: received CAPTURE ENFORCEMENT\n");
 #endif
     if (!valid_rid(call.rid)){
@@ -4136,8 +4155,8 @@ static ssize_t zsrm_write
     ret=-1;
     break;
   }
-  
-  
+
+
   // enable interrupts
   spin_unlock_irqrestore(&zsrmlock,flags);
 
@@ -4158,7 +4177,7 @@ static ssize_t zsrm_write
 }
 
 static long zsrm_ioctl(struct file *file,
-		       unsigned int cmd, 
+		       unsigned int cmd,
 		       unsigned long arg)
 {
 	return 0;
@@ -4178,7 +4197,7 @@ zsrm_cleanup_module(void){
   if (dev_class)
     class_destroy(dev_class);
   /* return back the device number. */
-  unregister_chrdev_region(dev_id, 1);	  
+  unregister_chrdev_region(dev_id, 1);
 }
 
 void print_overhead_stats(void)
@@ -4246,7 +4265,7 @@ void print_overhead_stats(void)
 	 avg_blocked_arrival_ns, num_blocked_arrivals);
   printk("avg departure ns: %llu \t wc departure ns: %llu \t num departures: %llu\n",
 	 avg_departure_ns, ticks2ns1(wc_departure_ticks), num_departures);
-  printk("zsrmv *** END OVERHEAD STATS *** \n");  
+  printk("zsrmv *** END OVERHEAD STATS *** \n");
 }
 
 static struct proc_dir_entry *proc_file = NULL;
@@ -4293,11 +4312,11 @@ static ssize_t proc_read(struct file *filp,	/* see include/linux/fs.h   */
 		    );
     } else {
       // send eof
-      len = 0 ; 
+      len = 0 ;
     }
 
     eof = 1-eof;
-    
+
     return len;
 }
 
@@ -4306,7 +4325,7 @@ static ssize_t proc_write (struct file *file, const char *buf, size_t count, lof
 }
 
 static long proc_ioctl(struct file *file,
-		       unsigned int cmd, 
+		       unsigned int cmd,
 		       unsigned long arg)
 {
 	return 0;
@@ -4345,10 +4364,10 @@ static int __init zsrm_init(void)
     printk("ZSRM.init(): could not create proc file\n");
     remove_proc_entry("zsrmv",NULL);
   }
-  
+
   // initialize scheduling top
   top = -1;
-  
+
   // initialize semaphore
   sema_init(&zsrmsem,1); // binary - initially unlocked
 
@@ -4360,16 +4379,16 @@ static int __init zsrm_init(void)
 
   init();
   printk(KERN_INFO "ZSRMMV: HELLO!\n");
-  
+
   /* get the device number of a char device. */
   ret = alloc_chrdev_region(&dev_id, 0, 1, DEVICE_NAME);
   if (ret < 0) {
     printk(KERN_WARNING "ZSRMMV: failed to allocate device.\n");
     return ret;
   }
-  
+
   dev_major = MAJOR(dev_id);
-  
+
   dev_class = class_create(THIS_MODULE,DEVICE_NAME);
   if (IS_ERR(dev_class)){
     printk(KERN_WARNING "ZSRMMV: failed to create device class.\n");
@@ -4378,34 +4397,34 @@ static int __init zsrm_init(void)
     zsrm_cleanup_module();
     return err;
   }
-  
+
   devno = MKDEV(dev_major, 0);
-  
-  // initialize the fops 
+
+  // initialize the fops
   zsrm_fops.owner = THIS_MODULE;
   zsrm_fops.open = zsrm_open;
   zsrm_fops.release = zsrm_release;
   zsrm_fops.read = zsrm_read;
   zsrm_fops.write = zsrm_write;
-  
+
   //#if LINUX_KERNEL_MINOR_VERSION < 37
   //zsrm_fops.ioctl = zsrm_ioctl;
   //#else
   zsrm_fops.unlocked_ioctl = zsrm_ioctl;
   //#endif
-  
+
   /* initialize the char device. */
   cdev_init(&c_dev, &zsrm_fops);
-  
+
   /* register the char device. */
   ret = cdev_add(&c_dev, dev_id, 1);
   if (ret < 0) {
     printk(KERN_WARNING "ZSRMMV: failed to register device.\n");
     return ret;
   }
-  
+
   device = device_create(dev_class, NULL, devno, NULL, DEVICE_NAME "%d", 0);
-  
+
   if (IS_ERR(device)){
     err = PTR_ERR(device);
     printk(KERN_WARNING "ZSRMMV: Error %d while trying to create dev %s%d", err, DEVICE_NAME,0);
@@ -4414,28 +4433,28 @@ static int __init zsrm_init(void)
   }
 
   // Start scheduler task
-  sched_task = kthread_create((void *)scheduler_task, NULL, "ZSRMMV scheduler thread");  
+  sched_task = kthread_create((void *)scheduler_task, NULL, "ZSRMMV scheduler thread");
   p.sched_priority = DAEMON_PRIORITY;
-  
+
   if (sched_setscheduler(sched_task, SCHED_FIFO, &p)<0){
     printk("ZSRMMV.init() error setting sched_task kernel thead priority\n");
   }
-  
+
   kthread_bind(sched_task, 0);
 
   // Start activator task
-  active_task = kthread_create((void *)activator_task, NULL, "Activator thread");  
+  active_task = kthread_create((void *)activator_task, NULL, "Activator thread");
   p.sched_priority = DAEMON_PRIORITY;
-  
+
   if (sched_setscheduler(active_task, SCHED_FIFO, &p)<0){
     printk("ZSRMMV.init() error setting active_task kernel thead priority\n");
   }
-  
+
   kthread_bind(active_task, 0);
 
 
   // For serial hardware control flow
-#ifdef __SERIAL_HARDWARE_CONTROL_FLOW__      
+#ifdef __SERIAL_HARDWARE_CONTROL_FLOW__
   if (gpio_request(GPIO_RTS, "RTS") <0){
     printk("ZSRM.init(): error requesting gpio pin 17\n");
   }
@@ -4446,24 +4465,24 @@ static int __init zsrm_init(void)
   if (gpio_direction_input(cts_gpio_pin)<0){
     printk("ZSRM.init(): error setting input direction for CTS\n");
   }
-  
+
   if (gpio_direction_output(GPIO_RTS,0)<0){
     printk("ZSRM.init(): error setting output direction and setting RTS to zero\n");
   }
 #endif
-  
+
 #ifdef __START_SERIAL_RECEIVER_TASK__
   // Start serial receiver task
   serial_recv_task = kthread_create((void *)serial_receiver_task, NULL, "Serial receiver thread");
 
   printk("ZSRMV: created serial receiver task ptr=%x\n",serial_recv_task);
-  
+
   p.sched_priority = RECEIVER_PRIORITY;
-  
+
   if (sched_setscheduler(serial_recv_task, SCHED_FIFO, &p)<0){
     printk("ZSRMMV.init() error setting serial_receiver_task kernel thead priority\n");
   }
-  
+
   kthread_bind(serial_recv_task, 0);
 
   if (serial_recv_task){
@@ -4476,26 +4495,26 @@ static int __init zsrm_init(void)
     /* ktime = ns_to_ktime(serial_timer_period_ns); */
     /* hrtimer_start(&serial_receiver_kernel_timer, ktime , HRTIMER_MODE_REL); */
   }
-#endif 
+#endif
 
 
     // Start serial sender task
   serial_sender_task = kthread_create((void *)serial_sending_task, NULL, "Serial sender thread");
 
   printk("ZSRMV: created serial sender task ptr=%x\n",serial_sender_task);
-  
+
   p.sched_priority = DAEMON_PRIORITY;
-  
+
   if (sched_setscheduler(serial_sender_task, SCHED_FIFO, &p)<0){
     printk("ZSRMMV.init() error setting serial_sender_task kernel thead priority\n");
   }
-  
+
   kthread_bind(serial_sender_task, 0);
 
   if (serial_sender_task){
     wake_up_process(serial_sender_task);
   }
-  
+
   init_cputsc();
 
   //hypmtscheduler_inittsc();
@@ -4515,9 +4534,9 @@ static int __init zsrm_init(void)
   /* hypmtscheduler_getrawtick64(&end_tick); */
 
   printk("ZSRMV: cycle counter test (for-loop 1000) start(%llu) end(%llu) count(%llu) count_ns(%llu) elapsed_ns(%llu) \n",start_tick, end_tick, (end_tick-start_tick), ticks2ns(end_tick-start_tick), (end_ns-start_ns));
-  
+
   printk(KERN_WARNING "ZSRMMV: ready!\n");
-    
+
   return 0;
 }
 
@@ -4538,30 +4557,30 @@ static void __exit zsrm_exit(void)
   //hrtimer_cancel(&serial_receiver_kernel_timer);
 #endif
 
-  
+
   sending_task_active=0;
   wake_up_interruptible(&serial_write_wait_queue);
   wake_up_process(serial_sender_task);
   kthread_stop(serial_sender_task);
 
-  
+
   /* if (serial_recv_task_running){ */
   /*   serial_recv_task_running = 0; */
   /*   if(!hypmtscheduler_deletehyptask(hyp_serial_recv_task_handle)){ */
   /*     printk("ZSRM.exit(): error deleting serial receiver hyper task\n"); */
   /*   } */
   /* } */
-  
+
   print_overhead_stats();
 
   end_tick = sysreg_read_cntpct(); //rdtsc64();
   printk("ZSRMV: cycle counter test start(%llu) end(%llu) count=%llu\n",start_tick, end_tick, (end_tick-start_tick));
-  
+
   printk(KERN_INFO "ZSRMMV: GOODBYE!\n");
-  
+
   zsrm_cleanup_module();
 
-#ifdef __SERIAL_HARDWARE_CONTROL_FLOW__      
+#ifdef __SERIAL_HARDWARE_CONTROL_FLOW__
   gpio_free(cts_gpio_pin);
   gpio_free(GPIO_RTS);
 #endif

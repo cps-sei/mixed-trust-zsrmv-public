@@ -87,7 +87,7 @@ void enforcement_handler(int rid)
 int main(int argc, char *argv[])
 {
   int rid, rid2,r;
-  int i;
+  int i,j;
   unsigned long long wcet;
   long l;
   int schedfd;
@@ -188,6 +188,8 @@ int main(int argc, char *argv[])
     
     printf("task1 attached and ready\n");
 
+    //for (j=0;j<100;j++){
+    
     for (i=0;i<10;i++){
       if (i == 0){
 	busy_timestamped(15, timestamp1, TS_BUFFER_SIZE, &tsindex1);	
@@ -204,13 +206,18 @@ int main(int argc, char *argv[])
       zsv_wait_period(schedfd,rid);
     }
 
-    zsv_get_wcet_ns(schedfd,rid, &wcet);
-    printf("WCET: %llu ns \n",wcet);
+    //}
+
+    //zsv_get_wcet_ns(schedfd,rid, &wcet);
+    //printf("WCET: %llu ns \n",wcet);
 
     //if (zsv_stop_enforcement_handler(enffd)<0){
+
+    /* NO ENFORCEMENT HANDLER
     if (zsv_stop_enforcement_handler(rid)<0){
       printf("error stopping enforcement handler\n");
     }
+    */
 
     zsv_delete_reserve(schedfd,rid);
 
@@ -238,6 +245,10 @@ int main(int argc, char *argv[])
 
     printf("task1 attached and ready\n");
 
+
+    //for (j=0;j<100;j++){
+
+    
     for (i=0;i<10;i++){
       if (i == 0){
 	busy_timestamped(20, timestamp1, TS_BUFFER_SIZE, &tsindex1);
@@ -254,13 +265,19 @@ int main(int argc, char *argv[])
       zsv_wait_period(schedfd,rid2);
     }
 
-    zsv_get_wcet_ns(schedfd,rid2, &wcet);
-    printf("WCET: %llu ns \n",wcet);
+
+    //}
+
+    
+    //zsv_get_wcet_ns(schedfd,rid2, &wcet);
+    //printf("WCET: %llu ns \n",wcet);
 
     //if (zsv_stop_enforcement_handler(enffd)<0){
+    /* NO ENFORCEMENT HANDLER
     if (zsv_stop_enforcement_handler(rid2)<0){
       printf("error stopping enforcement handler\n");
     }
+    */
 
     zsv_delete_reserve(schedfd,rid2);
   } else {
