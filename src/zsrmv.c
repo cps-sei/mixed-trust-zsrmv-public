@@ -1387,7 +1387,6 @@ void budget_enforcement(int rid, int request_stop)
       wc_hypercall_ticks = (hypercall_end_timestamp_ticks - hypercall_start_timestamp_ticks);
     }
     num_hypercalls ++;
-    //printk(KERN_INFO "ZSRMV.budget_enforcement(): dumpdebuglog: total entries=%u\n", debug_log_buffer_index);
     for (i = 0; i< debug_log_buffer_index; i++){
       add_trace_record(debug_log[i].hyptask_id, debug_log[i].timestamp, debug_log[i].event_type);
     }
@@ -1395,38 +1394,17 @@ void budget_enforcement(int rid, int request_stop)
     // build a preemption intersection after we add the trace
     hypertask_preemption_time_ticks = calculate_hypertask_preemption_time_ticks(rid, kernel_entry_timestamp_ticks);
 
-    //printk("ZSRM.budget_enforcement(): HYPER-TASK PREEMPTION rid(%d) discounted: %llu ticks : %llu ns\n", rid, hypertask_preemption_time_ticks, ticks2ns1(hypertask_preemption_time_ticks));
-
     if (reserve_table[rid].current_job_hypertasks_preemption_ticks < hypertask_preemption_time_ticks){
       reserve_table[rid].current_job_hypertasks_preemption_ticks = hypertask_preemption_time_ticks;
       // update the current_exectime_ticks
       // without taking into account hypertasks preemptions
-      //printk("ZSRM.budget_enforcement(rid(%d)): PREVIOUS current_exectime %llu ns \n",rid,ticks2ns1(reserve_table[rid].current_exectime_ticks));
       reserve_table[rid].current_exectime_ticks += (kernel_entry_timestamp_ticks - reserve_table[rid].start_ticks);
       reserve_table[rid].start_ticks = kernel_entry_timestamp_ticks;
-      //printk("ZSRM.budget_enforcement(rid(%d)): MODIFIED current_exectime %llu ns \n",rid,ticks2ns1(reserve_table[rid].current_exectime_ticks));
-      if (reserve_table[rid].exectime_ticks -
-	  (reserve_table[rid].current_exectime_ticks -
-	   reserve_table[rid].current_job_hypertasks_preemption_ticks)>0
-	  ){
 
-	/*****************************************************************************
-	 * Correct the budget enforcement timer as if it has not happened and return *
-	 *****************************************************************************/
-	// printk("ZSRM.budget_enforcement(rid(%d)): RESETTING TIMER at (%llu) timer (%llu) \n",rid,
-	//        get_now_ticks(),
-	//        (reserve_table[rid].exectime_ticks -
-	// 	(reserve_table[rid].current_exectime_ticks -
-	// 	 reserve_table[rid].current_job_hypertasks_preemption_ticks)
-	// 	)
-	//        );
-	if (start_enforcement_timer(&(reserve_table[rid])) == 0){
-	  // if enough time to defer the timer return otherwise assume that the timer expired
-	  return;
-	}
-      } else {
-	//printk("ZSRM.budget_enforcement(rid(%d)): NOT RESETTING TIMER -- proceeding to enforce\n",rid);
-      }
+			if (start_enforcement_timer(&(reserve_table[rid])) == 0){
+			  // if enough time to defer the timer return otherwise assume that the timer expired and proceed with enforcement
+			  return;
+			}
     }
   }
 
